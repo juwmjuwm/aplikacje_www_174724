@@ -20,8 +20,9 @@ already held by a regular user, cause a clear error.
 Register a VIEWER with `POST /api/register/` and
 `{"username":"alice","email":"alice@example.com","password":"Strong-unique-pass-123"}`.
 `email` is optional. Registration validates passwords and rejects privilege
-fields. The response contains `id`, `username`, `email`, and `role`, never the
-password.
+fields. The response contains `id`, `username`, `email`, `role`, and `roles`,
+never the password. A new VIEWER has `"role":"VIEWER"` and
+`"roles":["VIEWER"]`.
 
 Obtain tokens with `POST /api/token/` and
 `{"username":"alice","password":"Strong-unique-pass-123"}`. Refresh access
@@ -32,22 +33,35 @@ tokens return HTTP 401. Role changes take effect on existing access tokens.
 The account holder or ADMIN may `GET` or `PATCH /api/users/{id}/`. PATCH accepts
 only `username` and `email`, for example `{"email":"new@example.com"}`.
 ADMIN may `GET /api/users/` and `PATCH /api/users/{id}/role/` with
-`{"role":"PLANNER"}`, `{"role":"TEACHER"}`, or `{"role":"VIEWER"}`.
+`{"roles":["PLANNER","TEACHER"]}`, `{"roles":["TEACHER"]}`,
+`{"roles":["PLANNER"]}`, or `{"roles":[]}`. The array is the complete
+membership set; an empty array sets VIEWER. It cannot contain VIEWER, ADMIN,
+duplicates, or unknown values. Send exactly one of `roles` or the legacy
+`role` field. Responses keep `role` for compatibility and include the complete
+`roles` array in ADMIN, PLANNER, TEACHER order. For a combined account,
+`"role":"PLANNER"` and `"roles":["PLANNER","TEACHER"]`.
+The legacy single-role requests are `{"role":"PLANNER"}`,
+`{"role":"TEACHER"}`, or `{"role":"VIEWER"}`.
 Promote an existing VIEWER with `{"role":"TEACHER"}`. An unassigned TEACHER
 may be demoted with `{"role":"VIEWER"}`. Switching directly between TEACHER
-and PLANNER returns HTTP 409; transition through VIEWER. Removing TEACHER from
-an assigned user returns HTTP 409 with
+and PLANNER using the legacy `role` field returns HTTP 409; transition through
+VIEWER or use `roles` to set the complete membership set. Removing TEACHER from
+an assigned user, including one retaining PLANNER, returns HTTP 409 with
 `{"detail":"Reassign or delete this teacher's lessons before removing TEACHER."}`.
+Removing only PLANNER from an assigned combined-role teacher succeeds.
 The same guard applies to Django Admin group editing. Only ADMIN may
-`DELETE /api/users/{id}/`, and only when the target is currently VIEWER. A
-PLANNER or TEACHER must be demoted first. Deleting PLANNER, TEACHER, or ADMIN returns HTTP 409;
+`DELETE /api/users/{id}/`, and only when the regular target has neither
+membership. A PLANNER, TEACHER, or combined-role user must first have their
+memberships removed. Deleting PLANNER, TEACHER, combined-role, or ADMIN accounts returns HTTP 409;
 other users receive HTTP 403. Deleted accounts lose access immediately.
 
 ## Scheduling access
 
-Authenticated VIEWER, TEACHER, PLANNER, and ADMIN accounts can read scheduling data.
-Only PLANNER and ADMIN can create, update, or delete it; VIEWER and TEACHER writes return
-HTTP 403. Timetables are shared, so any PLANNER or ADMIN may edit them.
+Authenticated VIEWER, TEACHER, PLANNER, combined-role, and ADMIN accounts can
+read scheduling data. PLANNER membership and ADMIN status allow create, update,
+and delete, including when the PLANNER also teaches. VIEWER and TEACHER-only
+writes return HTTP 403. Removing PLANNER immediately removes write access from
+existing tokens. Timetables are shared, so any PLANNER or ADMIN may edit them.
 
 All API paths end in `/` and exchange JSON. Except for the teacher directory, each collection supports `GET` (200,
 JSON array) and `POST` (201, created record). Each detail path appends an integer
@@ -59,14 +73,15 @@ JSON array) and `POST` (201, created record). Each detail path appends an intege
 | `/api/timetables/` | `name`, optional `description` |
 | `/api/student-groups/` | `name`, `size` (positive integer) |
 | `/api/subjects/` | `name`, optional `description` |
-| `/api/teachers/` | Read-only TEACHER user directory; no writable fields |
+| `/api/teachers/` | Read-only directory of every TEACHER group member, including PLANNER and ADMIN teachers; no writable fields |
 | `/api/rooms/` | `name`, `capacity` (positive integer) |
 | `/api/lessons/` | `timetable`, `student_group`, `subject`, `room` (existing record IDs), `teacher` (TEACHER user ID); `weekday` (`MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, or `SUN`); `start_time`, `end_time` (for example, `09:00:00`) |
 
 `GET /api/teachers/` returns users such as
-`[{"id":7,"username":"alice","email":"alice@example.com","role":"TEACHER"}]`.
-`GET /api/teachers/7/` returns the same object. Other roles are omitted and
-return HTTP 404 at the detail path. Teacher POST, PUT, PATCH, and DELETE return
+`[{"id":7,"username":"alice","email":"alice@example.com","role":"PLANNER","roles":["PLANNER","TEACHER"]}]`.
+`GET /api/teachers/7/` returns the same object. An ADMIN teacher has
+`"role":"ADMIN"` and `"roles":["ADMIN","TEACHER"]`. Users without TEACHER
+membership are omitted and return HTTP 404 at the detail path. Teacher POST, PUT, PATCH, and DELETE return
 HTTP 405. Assign roles through the user role endpoint.
 
 For example, create a timetable with
@@ -87,7 +102,8 @@ with `POST /api/lessons/` and a body such as:
 ```
 
 Relations, including `teacher`, are returned as IDs. A missing, nonexistent, or
-non-TEACHER user ID in `teacher` returns HTTP 400 with a `teacher` field error.
+user ID without TEACHER membership in `teacher` returns HTTP 400 with a `teacher`
+field error. A PLANNER or ADMIN with TEACHER membership is eligible.
 Other missing or nonexistent related IDs return
 HTTP 400 with errors keyed by field, such as `{"room":["Invalid pk ..."]}`.
 Invalid lesson intervals return an `end_time` error; overlapping room, teacher,

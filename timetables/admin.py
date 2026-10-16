@@ -7,14 +7,12 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from .models import Lesson, Room, StudentGroup, Subject, Timetable, lock_teacher_assignment
-from .permissions import user_role
+from .permissions import user_roles
 
 
 class SafeUserChangeForm(UserChangeForm):
     def clean_groups(self):
         groups = self.cleaned_data['groups']
-        if groups.filter(name='TEACHER').exists() and groups.filter(name='PLANNER').exists():
-            raise ValidationError('TEACHER and PLANNER roles cannot be combined.')
         if (self.instance.pk and self.instance.lessons.exists()
                 and self.instance.groups.filter(name='TEACHER').exists()
                 and not groups.filter(name='TEACHER').exists()):
@@ -47,7 +45,7 @@ class SafeUserAdmin(BaseUserAdmin):
     form = SafeUserChangeForm
 
     def has_delete_permission(self, request, obj=None):
-        return super().has_delete_permission(request, obj) and (obj is None or user_role(obj) == 'VIEWER')
+        return super().has_delete_permission(request, obj) and (obj is None or user_roles(obj) == ['VIEWER'])
 
     def get_actions(self, request):
         actions = super().get_actions(request)
@@ -92,7 +90,7 @@ class RoomAdmin(admin.ModelAdmin):
 class LessonAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == 'teacher':
-            kwargs['queryset'] = User.objects.filter(groups__name='TEACHER', is_superuser=False).distinct()
+            kwargs['queryset'] = User.objects.filter(groups__name='TEACHER').distinct()
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     list_display = ("subject", "timetable", "weekday", "start_time", "end_time", "room", "teacher", "student_group")

@@ -87,8 +87,8 @@ class Lesson(models.Model):
         super().clean()
         errors = {}
         if self.teacher_id is not None:
-            from .permissions import user_role
-            if user_role(self.teacher) != 'TEACHER':
+            from .permissions import user_roles
+            if 'TEACHER' not in user_roles(self.teacher):
                 errors['teacher'] = 'Teacher must have the TEACHER role.'
         if self.start_time is not None and self.end_time is not None:
             if self.end_time <= self.start_time:

@@ -41,8 +41,8 @@ class RoomSerializer(serializers.ModelSerializer):
 
 class LessonSerializer(serializers.ModelSerializer):
     teacher = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.filter(
-        groups__name='TEACHER', is_superuser=False,
-    ).exclude(groups__name='PLANNER').distinct())
+        groups__name='TEACHER',
+    ).distinct())
     class Meta:
         model = Lesson
         fields = (

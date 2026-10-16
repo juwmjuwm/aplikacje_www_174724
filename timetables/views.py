@@ -44,7 +44,7 @@ class SubjectViewSet(JsonModelViewSet):
 
 
 class TeacherViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = get_user_model().objects.filter(groups__name='TEACHER', is_superuser=False).exclude(groups__name='PLANNER').distinct().order_by('pk')
+    queryset = get_user_model().objects.filter(groups__name='TEACHER').distinct().order_by('pk')
     serializer_class = UserSerializer
     renderer_classes = (JSONRenderer,)
     permission_classes = (SchedulingPermission,)

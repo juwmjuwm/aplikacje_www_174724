@@ -7,7 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .permissions import IsAdmin, IsSelfOrAdmin, user_role
+from .permissions import IsAdmin, IsSelfOrAdmin, user_role, user_roles
 from .models import Lesson, lock_teacher_assignment
 
 User = get_user_model()
@@ -23,13 +23,17 @@ class StrictFieldsMixin:
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
+    roles = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'role')
+        fields = ('id', 'username', 'email', 'role', 'roles')
 
     def get_role(self, obj):
         return user_role(obj)
+
+    def get_roles(self, obj):
+        return user_roles(obj)
 
 
 class RegisterSerializer(StrictFieldsMixin, serializers.ModelSerializer):
@@ -58,7 +62,18 @@ class ProfileSerializer(StrictFieldsMixin, serializers.ModelSerializer):
 
 
 class RoleSerializer(StrictFieldsMixin, serializers.Serializer):
-    role = serializers.ChoiceField(choices=('VIEWER', 'PLANNER', 'TEACHER'))
+    role = serializers.ChoiceField(choices=('VIEWER', 'PLANNER', 'TEACHER'), required=False)
+    roles = serializers.ListField(
+        child=serializers.ChoiceField(choices=('PLANNER', 'TEACHER')),
+        required=False, allow_empty=True,
+    )
+
+    def validate(self, attrs):
+        if ('role' in attrs) == ('roles' in attrs):
+            raise serializers.ValidationError('Supply exactly one of role or roles.')
+        if 'roles' in attrs and len(attrs['roles']) != len(set(attrs['roles'])):
+            raise serializers.ValidationError({'roles': ['Duplicate roles are not allowed.']})
+        return attrs
 
 
 class RegisterView(generics.CreateAPIView):
@@ -101,19 +116,22 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             user = User.objects.select_for_update().get(pk=pk)
             if user.is_superuser:
                 return Response({'detail': 'ADMIN role cannot be changed.'}, status=status.HTTP_409_CONFLICT)
-            current_role = user_role(user)
-            target_role = serializer.validated_data['role']
-            if {current_role, target_role} == {'TEACHER', 'PLANNER'}:
+            current_roles = set(user_roles(user))
+            legacy = 'role' in serializer.validated_data
+            target_roles = ({serializer.validated_data['role']}
+                            if legacy else set(serializer.validated_data['roles']))
+            target_roles.discard('VIEWER')
+            if legacy and {user_role(user), serializer.validated_data['role']} == {'TEACHER', 'PLANNER'}:
                 return Response({'detail': 'Switch between TEACHER and PLANNER through VIEWER.'}, status=status.HTTP_409_CONFLICT)
-            if current_role == 'TEACHER' and target_role != 'TEACHER' and Lesson.objects.filter(teacher=user).exists():
+            if 'TEACHER' in current_roles and 'TEACHER' not in target_roles and Lesson.objects.filter(teacher=user).exists():
                 return Response({'detail': 'Reassign or delete this teacher\'s lessons before removing TEACHER.'}, status=status.HTTP_409_CONFLICT)
             planner, _ = Group.objects.get_or_create(name='PLANNER')
             teacher, _ = Group.objects.get_or_create(name='TEACHER')
-            if target_role == 'PLANNER':
+            if 'PLANNER' in target_roles:
                 user.groups.add(planner)
             else:
                 user.groups.remove(planner)
-            if target_role == 'TEACHER':
+            if 'TEACHER' in target_roles:
                 user.groups.add(teacher)
             else:
                 user.groups.remove(teacher)
@@ -123,7 +141,7 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         self.get_object()
         with transaction.atomic():
             user = User.objects.select_for_update().get(pk=kwargs['pk'])
-            if user_role(user) != 'VIEWER':
+            if user.is_superuser or user_roles(user) != ['VIEWER']:
                 return Response({'detail': 'Only VIEWER accounts may be deleted.'}, status=status.HTTP_409_CONFLICT)
             user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

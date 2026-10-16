@@ -15,7 +15,7 @@ from rest_framework.test import APIClient
 
 from .admin import SafeUserChangeForm
 from .models import Lesson, Room, StudentGroup, Subject, Timetable
-from .permissions import user_role
+from .permissions import user_role, user_roles
 
 
 User = get_user_model()
@@ -110,7 +110,7 @@ class TeacherRoleTests(TestCase):
         self.assertEqual(anonymous.get('/api/teachers/').status_code, 401)
         response = self.client.get('/api/teachers/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [{'id': self.teacher.pk, 'username': 'teacher', 'email': '', 'role': 'TEACHER'}])
+        self.assertEqual(response.data, [{'id': self.teacher.pk, 'username': 'teacher', 'email': '', 'role': 'TEACHER', 'roles': ['TEACHER']}])
         self.assertEqual(self.client.get(f'/api/teachers/{self.viewer.pk}/').status_code, 404)
         self.assertEqual(self.client.get(f'/api/teachers/{self.teacher.pk}/').data['role'], 'TEACHER')
         self.assertEqual(self.client.post('/api/teachers/', {}, format='json').status_code, 405)
@@ -184,6 +184,137 @@ class TeacherRoleTests(TestCase):
         self.assertEqual(self.client.patch(f'/api/lessons/{lesson.pk}/', {'weekday': 'TUE'}, format='json').status_code, 200)
         self.client.force_authenticate(self.planner)
         self.assertEqual(self.client.patch(f'/api/lessons/{lesson.pk}/', {'weekday': 'WED'}, format='json').status_code, 200)
+
+    def test_role_representations_and_exact_membership_updates(self):
+        self.assertEqual(self.client.get(f'/api/users/{self.viewer.pk}/').data['roles'], ['VIEWER'])
+        self.assertEqual(self.client.get(f'/api/users/{self.planner.pk}/').data['roles'], ['PLANNER'])
+        self.assertEqual(self.client.get(f'/api/users/{self.teacher.pk}/').data['roles'], ['TEACHER'])
+        endpoint = f'/api/users/{self.viewer.pk}/role/'
+        response = self.client.patch(endpoint, {'roles': ['TEACHER', 'PLANNER']}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['roles'], ['PLANNER', 'TEACHER'])
+        self.assertEqual(response.data['role'], 'PLANNER')
+        self.assertEqual(self.client.patch(endpoint, {'roles': ['PLANNER', 'TEACHER']}, format='json').status_code, 200)
+        self.assertEqual(self.client.patch(endpoint, {'roles': ['TEACHER']}, format='json').data['roles'], ['TEACHER'])
+        self.assertEqual(self.client.patch(endpoint, {'roles': []}, format='json').data['roles'], ['VIEWER'])
+        self.assertEqual(self.client.patch(endpoint, {'role': 'PLANNER'}, format='json').data['roles'], ['PLANNER'])
+        for payload in ({}, {'role': 'VIEWER', 'roles': []}, {'roles': ['VIEWER']},
+                        {'roles': ['ADMIN']}, {'roles': ['PLANNER', 'PLANNER']},
+                        {'roles': ['OTHER']}, {'roles': 'PLANNER'}, {'roles': None}):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.client.patch(endpoint, payload, format='json').status_code, 400)
+                self.assertEqual(user_roles(self.viewer), ['PLANNER'])
+        self.assertEqual(self.client.patch(f'/api/users/{self.admin_user.pk}/role/', {'roles': ['TEACHER']}, format='json').status_code, 409)
+        reader = APIClient()
+        reader.force_authenticate(self.viewer)
+        self.assertEqual(reader.patch(endpoint, {'roles': ['TEACHER']}, format='json').status_code, 403)
+        self.assertEqual(reader.patch(f'/api/users/{self.viewer.pk}/', {'roles': ['TEACHER']}, format='json').status_code, 400)
+
+    def test_combined_teacher_directory_and_eligibility(self):
+        self.planner.groups.add(Group.objects.get(name='TEACHER'))
+        self.admin_user.groups.add(Group.objects.get(name='TEACHER'))
+        response = self.client.get('/api/teachers/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['id'] for item in response.data], [self.admin_user.pk, self.planner.pk, self.teacher.pk])
+        self.assertEqual(response.data[1]['roles'], ['PLANNER', 'TEACHER'])
+        self.assertEqual(response.data[1]['role'], 'PLANNER')
+        self.assertEqual(self.client.get(f'/api/teachers/{self.admin_user.pk}/').data['roles'], ['ADMIN', 'TEACHER'])
+        self.assertEqual(self.client.get(f'/api/teachers/{self.viewer.pk}/').status_code, 404)
+        resources = self.resources()
+        for index, teacher in enumerate((self.planner, self.admin_user)):
+            lesson = self.lesson(teacher=teacher, weekday=('MON', 'TUE')[index], resources=resources)
+            self.assertEqual(lesson.teacher_id, teacher.pk)
+            api_lesson = self.client.post('/api/lessons/', {
+                'timetable': resources[0].pk, 'student_group': resources[1].pk,
+                'subject': resources[2].pk, 'teacher': teacher.pk,
+                'room': resources[3].pk, 'weekday': ('WED', 'THU')[index],
+                'start_time': '09:00:00', 'end_time': '10:00:00',
+            }, format='json')
+            self.assertEqual(api_lesson.status_code, 201, api_lesson.data)
+            self.assertEqual(api_lesson.data['teacher'], teacher.pk)
+        teacher_field = admin.site._registry[Lesson].formfield_for_foreignkey(Lesson._meta.get_field('teacher'), None)
+        self.assertEqual(set(teacher_field.queryset), {self.teacher, self.planner, self.admin_user})
+        for teacher in (self.planner, self.admin_user):
+            self.assertEqual(teacher_field.clean(teacher.pk), teacher)
+        with self.assertRaises(ValidationError):
+            teacher_field.clean(self.viewer.pk)
+        admin_request = RequestFactory().get('/admin/timetables/lesson/add/')
+        admin_request.user = self.admin_user
+        lesson_form = admin.site._registry[Lesson].get_form(admin_request)
+        for teacher in (self.planner, self.admin_user):
+            form = lesson_form(data={
+                'timetable': resources[0].pk, 'student_group': resources[1].pk,
+                'subject': resources[2].pk, 'teacher': teacher.pk,
+                'room': resources[3].pk, 'weekday': 'FRI',
+                'start_time': '09:00:00', 'end_time': '10:00:00',
+            })
+            self.assertTrue(form.is_valid(), form.errors)
+
+    def test_assigned_combined_teacher_role_removal_is_atomic(self):
+        self.teacher.groups.add(Group.objects.get(name='PLANNER'))
+        lesson = self.lesson()
+        endpoint = f'/api/users/{self.teacher.pk}/role/'
+        rejected = self.client.patch(endpoint, {'roles': ['PLANNER']}, format='json')
+        self.assertEqual(rejected.status_code, 409)
+        self.assertEqual(user_roles(self.teacher), ['PLANNER', 'TEACHER'])
+        self.assertTrue(Lesson.objects.filter(pk=lesson.pk).exists())
+        self.assertEqual(self.client.delete(f'/api/users/{self.teacher.pk}/').status_code, 409)
+        form = SafeUserChangeForm(instance=self.teacher)
+        form.cleaned_data = {'groups': Group.objects.filter(name='PLANNER')}
+        with self.assertRaises(ValidationError):
+            form.clean_groups()
+        self.assertEqual(self.client.patch(endpoint, {'roles': ['TEACHER']}, format='json').status_code, 200)
+        self.assertEqual(user_roles(self.teacher), ['TEACHER'])
+        self.assertTrue(Lesson.objects.filter(pk=lesson.pk).exists())
+
+    def test_existing_token_uses_current_combined_memberships(self):
+        token = self.client.post('/api/token/', {'username': 'viewer', 'password': 'Strong-password-123'}, format='json').data['access']
+        reader = APIClient()
+        reader.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+        endpoint = f'/api/users/{self.viewer.pk}/role/'
+        self.assertEqual(reader.get('/api/timetables/').status_code, 200)
+        self.assertEqual(reader.post('/api/timetables/', {'name': 'Denied'}, format='json').status_code, 403)
+        self.assertEqual(self.client.patch(endpoint, {'roles': ['PLANNER', 'TEACHER']}, format='json').status_code, 200)
+        self.assertEqual(reader.post('/api/timetables/', {'name': 'Allowed'}, format='json').status_code, 201)
+        self.assertEqual(self.client.patch(endpoint, {'roles': ['TEACHER']}, format='json').status_code, 200)
+        self.assertEqual(reader.post('/api/timetables/', {'name': 'Denied again'}, format='json').status_code, 403)
+        self.assertEqual(reader.get('/api/timetables/').status_code, 200)
+
+    def test_admin_accepts_combined_groups(self):
+        browser = Client()
+        browser.force_login(self.admin_user)
+        groups = list(Group.objects.filter(name__in=('PLANNER', 'TEACHER')).values_list('pk', flat=True))
+        response = browser.post(f'/admin/auth/user/{self.viewer.pk}/change/', {
+            'username': self.viewer.username, 'email': self.viewer.email,
+            'is_active': 'on', 'is_staff': '', 'is_superuser': '',
+            'first_name': '', 'last_name': '',
+            'date_joined_0': self.viewer.date_joined.strftime('%Y-%m-%d'),
+            'date_joined_1': self.viewer.date_joined.strftime('%H:%M:%S'),
+            'groups': groups, 'user_permissions': [],
+            '_save': 'Save',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(user_roles(self.viewer), ['PLANNER', 'TEACHER'])
+        self.assertEqual(browser.get(f'/admin/auth/user/{self.viewer.pk}/delete/').status_code, 403)
+
+    def test_admin_blocks_teacher_removal_from_assigned_combined_user(self):
+        self.teacher.groups.add(Group.objects.get(name='PLANNER'))
+        lesson = self.lesson()
+        browser = Client()
+        browser.force_login(self.admin_user)
+        response = browser.post(f'/admin/auth/user/{self.teacher.pk}/change/', {
+            'username': self.teacher.username, 'email': self.teacher.email,
+            'is_active': 'on', 'is_staff': '', 'is_superuser': '',
+            'first_name': '', 'last_name': '',
+            'date_joined_0': self.teacher.date_joined.strftime('%Y-%m-%d'),
+            'date_joined_1': self.teacher.date_joined.strftime('%H:%M:%S'),
+            'groups': [Group.objects.get(name='PLANNER').pk], 'user_permissions': [],
+            '_save': 'Save',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reassign or delete this teacher&#x27;s lessons")
+        self.assertEqual(user_roles(self.teacher), ['PLANNER', 'TEACHER'])
+        self.assertTrue(Lesson.objects.filter(pk=lesson.pk).exists())
 
 
 class TeacherMigrationTests(TransactionTestCase):

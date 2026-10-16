@@ -1,21 +1,24 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
 
+def user_roles(user):
+    memberships = set(user.groups.filter(name__in=('PLANNER', 'TEACHER')).values_list('name', flat=True))
+    roles = (['ADMIN'] if user.is_superuser else []) + [
+        role for role in ('PLANNER', 'TEACHER') if role in memberships
+    ]
+    return roles or ['VIEWER']
+
+
 def user_role(user):
-    if user.is_superuser:
-        return 'ADMIN'
-    if user.groups.filter(name='PLANNER').exists():
-        return 'PLANNER'
-    if user.groups.filter(name='TEACHER').exists():
-        return 'TEACHER'
-    return 'VIEWER'
+    return user_roles(user)[0]
 
 
 class SchedulingPermission(BasePermission):
     def has_permission(self, request, view):
         return bool(
             request.user and request.user.is_authenticated and request.user.is_active
-            and (request.method in SAFE_METHODS or user_role(request.user) in ('PLANNER', 'ADMIN'))
+            and (request.method in SAFE_METHODS or request.user.is_superuser
+                 or 'PLANNER' in user_roles(request.user))
         )
 
 
