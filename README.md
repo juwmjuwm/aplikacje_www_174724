@@ -18,11 +18,12 @@ already held by a regular user, cause a clear error.
 ## Authentication and users
 
 Register a VIEWER with `POST /api/register/` and
-`{"username":"alice","password":"Strong-unique-pass-123"}`.
-Registration validates passwords and rejects email and privilege
-fields. The response contains `id`, `username`, `role`, and `roles`,
-never the password. A new VIEWER has `"role":"VIEWER"` and
-`"roles":["VIEWER"]`.
+`{"username":"alice","password":"Strong-unique-pass-123","first_name":"Alice","last_name":"Nowak"}`.
+Both names are required and must contain non-whitespace characters; they are
+trimmed before storage. Registration validates passwords and rejects email and
+privilege fields. A response is
+`{"id":7,"username":"alice","first_name":"Alice","last_name":"Nowak","role":"VIEWER","roles":["VIEWER"]}`.
+Account responses omit email and passwords.
 
 Obtain tokens with `POST /api/token/` and
 `{"username":"alice","password":"Strong-unique-pass-123"}`. Refresh access
@@ -31,8 +32,11 @@ with `POST /api/token/refresh/` and `{"refresh":"<refresh token>"}`. Send
 tokens return HTTP 401. Role changes take effect on existing access tokens.
 
 The account holder or ADMIN may `GET` or `PATCH /api/users/{id}/`. PATCH accepts
-only `username`, for example `{"username":"alice2"}`. Email, password, and
-privilege fields return HTTP 400. Account responses never include passwords.
+`username`, `first_name`, and `last_name`, for example
+`{"first_name":"Alicja"}`. Submitted names are trimmed and cannot be blank;
+omitted fields stay unchanged. Email, password, and privilege fields return
+HTTP 400. The response includes both names, `role`, and `roles`, and omits
+email and passwords. Existing accounts with empty names remain readable.
 To change your own password, send `POST /api/users/me/password/` with
 `{"current_password":"Strong-unique-pass-123","new_password":"Another-strong-pass-456"}`
 and a valid access token. The current password must match; the new password
@@ -49,6 +53,7 @@ duplicates, or unknown values. Send exactly one of `roles` or the legacy
 `"role":"PLANNER"` and `"roles":["PLANNER","TEACHER"]`.
 The legacy single-role requests are `{"role":"PLANNER"}`,
 `{"role":"TEACHER"}`, or `{"role":"VIEWER"}`.
+The ADMIN user list is paginated like the scheduling collections below.
 Promote an existing VIEWER with `{"role":"TEACHER"}`. An unassigned TEACHER
 may be demoted with `{"role":"VIEWER"}`. Switching directly between TEACHER
 and PLANNER using the legacy `role` field returns HTTP 409; transition through
@@ -77,10 +82,22 @@ and delete, including when the PLANNER also teaches. VIEWER and TEACHER-only
 writes return HTTP 403. Removing PLANNER immediately removes write access from
 existing tokens. Timetables are shared, so any PLANNER or ADMIN may edit them.
 
-All API paths end in `/` and exchange JSON. Except for the teacher directory, each collection supports `GET` (200,
-JSON array) and `POST` (201, created record). Each detail path appends an integer
+All API paths end in `/` and exchange JSON. Scheduling collections support
+`GET` (200, paginated JSON object); all except the teacher directory support
+`POST` (201, created record). Each detail path appends an integer
 `id` and supports `GET`, `PUT`, and `PATCH` (200, JSON record), plus `DELETE`
-(204, empty body). The `id` field in every response is read-only.
+(204, empty body), except the read-only teacher detail path. The `id` field in
+every response is read-only.
+
+`GET /api/timetables/`, `/api/lessons/`, `/api/student-groups/`,
+`/api/subjects/`, `/api/teachers/`, `/api/rooms/`, and ADMIN-only
+`/api/users/` return `{"count":12,"next":"http://testserver/api/rooms/?page=2","previous":null,"results":[...]}`
+with the requested records in `results`. Clients that previously read a bare
+array must read `results`. The default page holds 10 records. Use `page` to
+select a page and `size` for a positive integer page size, for example
+`GET /api/rooms/?page=2&size=5`. Values above 100 are capped at 100;
+nonnumeric, zero, and negative sizes return HTTP 400 with a `size` error.
+`next` and `previous` are URLs or `null`, and preserve active query parameters.
 
 | Collection path | Writable request fields |
 | --- | --- |
@@ -91,8 +108,15 @@ JSON array) and `POST` (201, created record). Each detail path appends an intege
 | `/api/rooms/` | `name`, `capacity` (positive integer) |
 | `/api/lessons/` | `timetable`, `student_group`, `subject`, `room` (existing record IDs), `teacher` (TEACHER user ID); `weekday` (`MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, or `SUN`); `start_time`, `end_time` (for example, `09:00:00`) |
 
+Use `search` for case-insensitive partial matches on timetable, student group,
+and room `name`; subject `name` or `description`; and TEACHER member
+`first_name` or `last_name`. Search filters before pagination. For example,
+`GET /api/subjects/?search=biology&size=5&page=2` returns the second page of
+up to five matching subjects, with `count` and navigation URLs for the same
+search. Lessons and the ADMIN user list have no `search` filter.
+
 `GET /api/teachers/` returns users such as
-`[{"id":7,"username":"alice","role":"PLANNER","roles":["PLANNER","TEACHER"]}]`.
+`{"count":1,"next":null,"previous":null,"results":[{"id":7,"username":"alice","first_name":"Alice","last_name":"Nowak","role":"PLANNER","roles":["PLANNER","TEACHER"]}]}`.
 `GET /api/teachers/7/` returns the same object. An ADMIN teacher has
 `"role":"ADMIN"` and `"roles":["ADMIN","TEACHER"]`. Users without TEACHER
 membership are omitted and return HTTP 404 at the detail path. Teacher POST, PUT, PATCH, and DELETE return

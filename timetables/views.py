@@ -2,11 +2,13 @@ from django.contrib.auth import get_user_model
 from django.db.models.deletion import ProtectedError
 from django.http import HttpResponse, JsonResponse
 from rest_framework import status, viewsets
+from rest_framework.filters import SearchFilter
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from .accounts import UserSerializer
 from .models import Lesson, Room, StudentGroup, Subject, Timetable
+from .pagination import CollectionPagination
 from .permissions import SchedulingPermission
 from .serializers import (
     LessonSerializer, RoomSerializer, StudentGroupSerializer,
@@ -17,6 +19,7 @@ from .serializers import (
 class JsonModelViewSet(viewsets.ModelViewSet):
     renderer_classes = (JSONRenderer,)
     permission_classes = (SchedulingPermission,)
+    pagination_class = CollectionPagination
 
     def destroy(self, request, *args, **kwargs):
         try:
@@ -31,16 +34,22 @@ class JsonModelViewSet(viewsets.ModelViewSet):
 class TimetableViewSet(JsonModelViewSet):
     queryset = Timetable.objects.all()
     serializer_class = TimetableSerializer
+    filter_backends = (SearchFilter,)
+    search_fields = ('name',)
 
 
 class StudentGroupViewSet(JsonModelViewSet):
     queryset = StudentGroup.objects.all()
     serializer_class = StudentGroupSerializer
+    filter_backends = (SearchFilter,)
+    search_fields = ('name',)
 
 
 class SubjectViewSet(JsonModelViewSet):
     queryset = Subject.objects.all()
     serializer_class = SubjectSerializer
+    filter_backends = (SearchFilter,)
+    search_fields = ('name', 'description')
 
 
 class TeacherViewSet(viewsets.ReadOnlyModelViewSet):
@@ -48,11 +57,16 @@ class TeacherViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = UserSerializer
     renderer_classes = (JSONRenderer,)
     permission_classes = (SchedulingPermission,)
+    pagination_class = CollectionPagination
+    filter_backends = (SearchFilter,)
+    search_fields = ('first_name', 'last_name')
 
 
 class RoomViewSet(JsonModelViewSet):
     queryset = Room.objects.all()
     serializer_class = RoomSerializer
+    filter_backends = (SearchFilter,)
+    search_fields = ('name',)
 
 
 class LessonViewSet(JsonModelViewSet):

@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 
 from .permissions import IsAdmin, IsSelfOrAdmin, user_role, user_roles
 from .models import Lesson, lock_teacher_assignment
+from .pagination import CollectionPagination
 
 User = get_user_model()
 
@@ -33,7 +34,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'role', 'roles')
+        fields = ('id', 'username', 'first_name', 'last_name', 'role', 'roles')
 
     def get_role(self, obj):
         return user_role(obj)
@@ -44,13 +45,19 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
+    first_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
+    last_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
 
     class Meta:
         model = User
-        fields = ('username', 'password')
+        fields = ('username', 'password', 'first_name', 'last_name')
 
     def validate(self, attrs):
-        candidate = User(username=attrs['username'])
+        candidate = User(
+            username=attrs['username'],
+            first_name=attrs['first_name'],
+            last_name=attrs['last_name'],
+        )
         try:
             password_validation.validate_password(attrs['password'], candidate)
         except DjangoValidationError as exc:
@@ -62,9 +69,12 @@ class RegisterSerializer(StrictFieldsMixin, serializers.ModelSerializer):
 
 
 class ProfileSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    first_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
+    last_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
+
     class Meta:
         model = User
-        fields = ('username',)
+        fields = ('username', 'first_name', 'last_name')
 
 
 class PasswordChangeSerializer(StrictFieldsMixin, serializers.Serializer):
@@ -126,6 +136,7 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
                   viewsets.GenericViewSet):
     queryset = User.objects.all().order_by('pk')
     serializer_class = UserSerializer
+    pagination_class = CollectionPagination
     http_method_names = ('get', 'patch', 'delete', 'head', 'options')
 
     def get_permissions(self):
