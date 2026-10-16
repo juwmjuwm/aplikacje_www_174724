@@ -16,9 +16,19 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from timetables.accounts import RegisterView, UserViewSet
+from rest_framework.routers import SimpleRouter
+
+user_router = SimpleRouter()
+user_router.register('users', UserViewSet, basename='user')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('timetables.api_urls')),
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/register/', RegisterView.as_view(), name='register'),
+    path('api/', include(user_router.urls)),
+    path('api/', include('timetables.urls')),
     path('timetables/', include('timetables.urls')),
 ]

@@ -5,6 +5,7 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from .models import Lesson, Room, StudentGroup, Subject, Teacher, Timetable
+from .permissions import SchedulingPermission
 from .serializers import (
     LessonSerializer, RoomSerializer, StudentGroupSerializer,
     SubjectSerializer, TeacherSerializer, TimetableSerializer,
@@ -13,6 +14,7 @@ from .serializers import (
 
 class JsonModelViewSet(viewsets.ModelViewSet):
     renderer_classes = (JSONRenderer,)
+    permission_classes = (SchedulingPermission,)
 
     def destroy(self, request, *args, **kwargs):
         try:

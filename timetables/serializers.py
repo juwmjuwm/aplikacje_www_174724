@@ -6,9 +6,14 @@ from .models import Lesson, Room, StudentGroup, Subject, Teacher, Timetable
 
 
 class TimetableSerializer(serializers.ModelSerializer):
+    def to_internal_value(self, data):
+        if 'owner' in data:
+            raise serializers.ValidationError({'owner': ['This field is not allowed.']})
+        return super().to_internal_value(data)
+
     class Meta:
         model = Timetable
-        fields = ("id", "name", "owner", "description")
+        fields = ("id", "name", "description")
         read_only_fields = ("id",)
 
 

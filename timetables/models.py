@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -6,7 +5,6 @@ from django.db import models
 
 class Timetable(models.Model):
     name = models.CharField(max_length=50)
-    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="timetables")
     description = models.TextField(blank=True, default="")
 
     class Meta:

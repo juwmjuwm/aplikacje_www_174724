@@ -5,9 +5,8 @@ from .models import Lesson, Room, StudentGroup, Subject, Teacher, Timetable
 
 @admin.register(Timetable)
 class TimetableAdmin(admin.ModelAdmin):
-    list_display = ("name", "owner")
-    search_fields = ("name", "owner__username")
-    list_filter = ("owner",)
+    list_display = ("name", "description")
+    search_fields = ("name", "description")
 
 
 @admin.register(StudentGroup)
