@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin, UserAdmin as BaseUserAdmin
-from django.contrib.auth.forms import UserChangeForm
+from django.contrib.auth.forms import AdminUserCreationForm, UserChangeForm
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -10,7 +10,20 @@ from .models import Lesson, Room, StudentGroup, Subject, Timetable, lock_teacher
 from .permissions import user_roles
 
 
+User = get_user_model()
+
+
+class SafeUserCreationForm(AdminUserCreationForm):
+    class Meta(AdminUserCreationForm.Meta):
+        model = User
+        fields = ('username',)
+
+
 class SafeUserChangeForm(UserChangeForm):
+    class Meta(UserChangeForm.Meta):
+        model = User
+        fields = '__all__'
+
     def clean_groups(self):
         groups = self.cleaned_data['groups']
         if (self.instance.pk and self.instance.lessons.exists()
@@ -20,8 +33,6 @@ class SafeUserChangeForm(UserChangeForm):
         return groups
 
 
-User = get_user_model()
-admin.site.unregister(User)
 admin.site.unregister(Group)
 
 
@@ -43,6 +54,15 @@ class SafeGroupAdmin(BaseGroupAdmin):
 @admin.register(User)
 class SafeUserAdmin(BaseUserAdmin):
     form = SafeUserChangeForm
+    add_form = SafeUserCreationForm
+    fieldsets = (
+        (None, {'fields': ('username', 'password')}),
+        ('Personal info', {'fields': ('first_name', 'last_name')}),
+        ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
+        ('Important dates', {'fields': ('last_login', 'date_joined')}),
+    )
+    list_display = ('username', 'first_name', 'last_name', 'is_staff')
+    search_fields = ('username', 'first_name', 'last_name')
 
     def has_delete_permission(self, request, obj=None):
         return super().has_delete_permission(request, obj) and (obj is None or user_roles(obj) == ['VIEWER'])
@@ -96,7 +116,7 @@ class LessonAdmin(admin.ModelAdmin):
     list_display = ("subject", "timetable", "weekday", "start_time", "end_time", "room", "teacher", "student_group")
     search_fields = (
         "subject__name", "timetable__name", "room__name",
-        "teacher__username", "teacher__email", "student_group__name",
+        "teacher__username", "student_group__name",
     )
     list_filter = ("weekday", "room", "teacher", "student_group", "timetable")
     list_select_related = ("subject", "timetable", "room", "teacher", "student_group")

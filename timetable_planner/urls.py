@@ -17,7 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from timetables.accounts import RegisterView, UserViewSet
+from timetables.accounts import PasswordChangeView, RegisterView, UserViewSet
 from rest_framework.routers import SimpleRouter
 
 user_router = SimpleRouter()
@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/register/', RegisterView.as_view(), name='register'),
+    path('api/users/me/password/', PasswordChangeView.as_view(), name='password_change'),
     path('api/', include(user_router.urls)),
     path('api/', include('timetables.urls')),
     path('timetables/', include('timetables.urls')),

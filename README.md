@@ -8,7 +8,7 @@ Django and JWT signing. Set `INITIAL_ADMIN_USERNAME` and
 `INITIAL_ADMIN_PASSWORD` before initial bootstrap. The `.env` file is ignored
 by Git; existing host environment variables take precedence.
 
-Run `python manage.py migrate`, then `python manage.py bootstrap_accounts`, then
+For a fresh database, run `python manage.py migrate`, then `python manage.py bootstrap_accounts`, then
 `python manage.py runserver`. Run bootstrap after migrations on each deployment
 start. It creates the `PLANNER` and `TEACHER` groups and, if none exists, an ADMIN superuser
 from the initial credentials. Repeated runs preserve its password and
@@ -18,9 +18,9 @@ already held by a regular user, cause a clear error.
 ## Authentication and users
 
 Register a VIEWER with `POST /api/register/` and
-`{"username":"alice","email":"alice@example.com","password":"Strong-unique-pass-123"}`.
-`email` is optional. Registration validates passwords and rejects privilege
-fields. The response contains `id`, `username`, `email`, `role`, and `roles`,
+`{"username":"alice","password":"Strong-unique-pass-123"}`.
+Registration validates passwords and rejects email and privilege
+fields. The response contains `id`, `username`, `role`, and `roles`,
 never the password. A new VIEWER has `"role":"VIEWER"` and
 `"roles":["VIEWER"]`.
 
@@ -31,7 +31,14 @@ with `POST /api/token/refresh/` and `{"refresh":"<refresh token>"}`. Send
 tokens return HTTP 401. Role changes take effect on existing access tokens.
 
 The account holder or ADMIN may `GET` or `PATCH /api/users/{id}/`. PATCH accepts
-only `username` and `email`, for example `{"email":"new@example.com"}`.
+only `username`, for example `{"username":"alice2"}`. Email, password, and
+privilege fields return HTTP 400. Account responses never include passwords.
+To change your own password, send `POST /api/users/me/password/` with
+`{"current_password":"Strong-unique-pass-123","new_password":"Another-strong-pass-456"}`
+and a valid access token. The current password must match; the new password
+must differ and pass the registration password policy. Success is HTTP 204 with
+an empty body. Missing, invalid, or extra fields return HTTP 400; missing
+authentication returns HTTP 401. Obtain new tokens using the new password.
 ADMIN may `GET /api/users/` and `PATCH /api/users/{id}/role/` with
 `{"roles":["PLANNER","TEACHER"]}`, `{"roles":["TEACHER"]}`,
 `{"roles":["PLANNER"]}`, or `{"roles":[]}`. The array is the complete
@@ -78,7 +85,7 @@ JSON array) and `POST` (201, created record). Each detail path appends an intege
 | `/api/lessons/` | `timetable`, `student_group`, `subject`, `room` (existing record IDs), `teacher` (TEACHER user ID); `weekday` (`MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, or `SUN`); `start_time`, `end_time` (for example, `09:00:00`) |
 
 `GET /api/teachers/` returns users such as
-`[{"id":7,"username":"alice","email":"alice@example.com","role":"PLANNER","roles":["PLANNER","TEACHER"]}]`.
+`[{"id":7,"username":"alice","role":"PLANNER","roles":["PLANNER","TEACHER"]}]`.
 `GET /api/teachers/7/` returns the same object. An ADMIN teacher has
 `"role":"ADMIN"` and `"roles":["ADMIN","TEACHER"]`. Users without TEACHER
 membership are omitted and return HTTP 404 at the detail path. Teacher POST, PUT, PATCH, and DELETE return
@@ -137,3 +144,23 @@ needed. Run `python manage.py bootstrap_accounts` afterward to create the
 TEACHER group. To roll back, restore the database backup together with the
 pre-migration application code; reversing the migration cannot recover the
 discarded rows. Existing clients must use TEACHER user IDs in lesson payloads.
+
+### Email-free user migration
+
+Fresh databases need only `python manage.py migrate` followed by
+`python manage.py bootstrap_accounts`. The active user table is `auth_user`,
+without an email column. Registration and profile requests containing email
+return HTTP 400, and account and teacher responses omit it.
+
+For an existing SQLite database already migrated through `timetables.0003`,
+stop all writers. With the new code and environment loaded, run
+`python manage.py prepare_user_migration --backup path/to/backup.sqlite3`
+before `python manage.py migrate`. The command checks the expected legacy
+tables, columns, migration history, and foreign keys, creates a new backup,
+and records the compatible custom user initial migration. It is safe to rerun
+after that migration has been recorded. Run `python manage.py migrate`, then
+`python manage.py bootstrap_accounts`, and restart the application. Existing
+account IDs, password hashes, roles, permissions, and lesson references remain;
+stored email values are discarded. To roll back, restore the backup together
+with the previous application code. Reversing the email removal migration is
+unsupported.

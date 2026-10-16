@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -6,6 +8,7 @@ from rest_framework import generics, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .permissions import IsAdmin, IsSelfOrAdmin, user_role, user_roles
 from .models import Lesson, lock_teacher_assignment
@@ -15,6 +18,8 @@ User = get_user_model()
 
 class StrictFieldsMixin:
     def to_internal_value(self, data):
+        if not isinstance(data, Mapping):
+            return super().to_internal_value(data)
         unknown = set(data) - set(self.fields)
         if unknown:
             raise serializers.ValidationError({field: ['This field is not allowed.'] for field in unknown})
@@ -27,7 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'role', 'roles')
+        fields = ('id', 'username', 'role', 'roles')
 
     def get_role(self, obj):
         return user_role(obj)
@@ -41,10 +46,10 @@ class RegisterSerializer(StrictFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password')
+        fields = ('username', 'password')
 
     def validate(self, attrs):
-        candidate = User(username=attrs['username'], email=attrs.get('email', ''))
+        candidate = User(username=attrs['username'])
         try:
             password_validation.validate_password(attrs['password'], candidate)
         except DjangoValidationError as exc:
@@ -58,7 +63,35 @@ class RegisterSerializer(StrictFieldsMixin, serializers.ModelSerializer):
 class ProfileSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('username', 'email')
+        fields = ('username',)
+
+
+class PasswordChangeSerializer(StrictFieldsMixin, serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        if not user.check_password(attrs['current_password']):
+            raise serializers.ValidationError({'current_password': ['Incorrect password.']})
+        if attrs['current_password'] == attrs['new_password']:
+            raise serializers.ValidationError({'new_password': ['Choose a different password.']})
+        try:
+            password_validation.validate_password(attrs['new_password'], user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({'new_password': exc.messages}) from exc
+        return attrs
+
+
+class PasswordChangeView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        request.user.set_password(serializer.validated_data['new_password'])
+        request.user.save(update_fields=['password'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RoleSerializer(StrictFieldsMixin, serializers.Serializer):
