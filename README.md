@@ -1,167 +1,125 @@
 # The Timetabler
 
-## Timetable API
+API JSON do tygodniowych planów zajęć, lekcji, sal, przedmiotów, grup uczniów i kont nauczycieli. Wykorzystuje Django, SQLite i tokeny JWT. Nie ma osobnego interfejsu użytkownika; korzystaj z interaktywnej strony API lub klienta HTTP.
 
-Install dependencies with `pip install -r requirements.txt`. Copy `.env.example`
-to `.env` and replace its placeholders. `DJANGO_SECRET_KEY` is required for
-Django and JWT signing. Set `INITIAL_ADMIN_USERNAME` and
-`INITIAL_ADMIN_PASSWORD` before initial bootstrap. The `.env` file is ignored
-by Git; existing host environment variables take precedence.
+## Uruchomienie lokalne
 
-For a fresh database, run `python manage.py migrate`, then `python manage.py bootstrap_accounts`, then
-`python manage.py runserver`. Run bootstrap after migrations on each deployment
-start. It creates the `PLANNER` and `TEACHER` groups and, if none exists, an ADMIN superuser
-from the initial credentials. Repeated runs preserve its password and
-privileges. Missing credentials when no ADMIN exists, or a configured username
-already held by a regular user, cause a clear error.
-`INITIAL_ADMIN_USERNAME` is canonicalized with Unicode NFKC and case folding:
-`ADMIN` creates or finds `admin`. Repeated bootstrap runs preserve an existing
-ADMIN's password and privileges, even when the configured casing changes.
-Choose a unique initial password with at least eight characters, including a
-lowercase letter, uppercase letter, decimal digit, and punctuation or symbol.
-The value in `.env.example` is illustrative and must be replaced before use.
+### Wymagania wstępne
 
-## Authentication and users
+- Python **3.12 lub nowszy** oraz pip. Sprawdź wersję poleceniem `python --version` (lub `py --version` w systemie Windows).
+- Terminal otwarty w katalogu tego projektu. Git jest potrzebny tylko wtedy, gdy klonujesz projekt.
+- Nie jest potrzebny osobny serwer bazy danych: Django tworzy lokalną bazę SQLite podczas migracji.
 
-### Swagger API reference
+Aby utworzyć nową bazę danych, uruchom te polecenia w PowerShellu w systemie Windows:
 
-Start the Django server and open `http://127.0.0.1:8000/api/docs/` for Swagger UI.
-The generated OpenAPI 3.0 schema is available at
-`http://127.0.0.1:8000/api/schema/`. Both pages are public; API permissions
-still apply to protected requests.
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
 
-To try a protected request, first use `POST /api/register/` to create a VIEWER
-account if needed. In Swagger UI, open `POST /api/token/`, select **Try it out**,
-enter that account's `username` and `password`, and select **Execute**. Copy the
-`access` value from the response. Select **Authorize** at the top of the page,
-paste the access token into the `jwtAuth` field, and confirm. Swagger UI sends
-it as `Authorization: Bearer <access token>` on protected operations. Try
-`GET /api/rooms/` to confirm access. When the access token expires, use
-`POST /api/token/refresh/` with the `refresh` value to get a new one.
+W systemie macOS lub Linux:
 
-Register a VIEWER with `POST /api/register/` and
-`{"username":"Alice","password":"Strong-unique-pass-123","first_name":"Alice","last_name":"Nowak"}`.
-Both names are required, trimmed, and must contain only Unicode letters.
-Accepted names are stored with the first letter uppercase and the rest lowercase.
-Registration validates passwords and rejects email and
-privilege fields. A response is
-`{"id":7,"username":"alice","first_name":"Alice","last_name":"Nowak","role":"VIEWER","roles":["VIEWER"]}`.
-Account responses omit email and passwords.
-Usernames are normalized with Unicode NFKC and case folding before storage;
-the lowercase value in the response is authoritative. Registering `ALICE`
-after `alice` exists returns HTTP 400 with a `username` error and creates no
-account. Usernames may contain only Unicode letters, Unicode decimal digits,
-and underscores, with at most 150 characters before and after normalization.
-Spaces, hyphens, periods, and at signs are rejected. New passwords must have
-at least eight characters and a Unicode lowercase letter, uppercase letter,
-decimal digit, and punctuation or symbol. Whitespace does not count as a
-special character. Existing passwords remain usable until changed.
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+```
 
-Obtain tokens with `POST /api/token/` and
-`{"username":"ALICE","password":"Strong-unique-pass-123"}`. Username input
-is matched without regard to case in token and Django Admin login. Invalid or
-inactive credentials are still denied. Refresh access
-with `POST /api/token/refresh/` and `{"refresh":"<refresh token>"}`. Send
-`Authorization: Bearer <access token>` on protected requests. Missing or invalid
-tokens return HTTP 401. Role changes take effect on existing access tokens.
+Jeśli PowerShell blokuje aktywację, w pozostałych poleceniach użyj `.\.venv\Scripts\python.exe` zamiast `python`. Środowisko wirtualne oddziela pakiety tego projektu od pakietów innych projektów Pythona.
 
-The account holder or ADMIN may `GET` or `PATCH /api/users/{id}/`. PATCH accepts
-`username`, `first_name`, and `last_name`, for example
-`{"username":"ALICE","first_name":"Alicja"}`. This succeeds for `alice`
-and returns `"username":"alice"`; a different account's canonical username
-returns HTTP 400 with a `username` error and leaves the profile unchanged.
-Submitted names are trimmed, cannot be blank, and may contain only Unicode letters;
-omitted fields stay unchanged. Email, password, and privilege fields return
-HTTP 400. The response includes both names, `role`, and `roles`, and omits
-email and passwords. Existing accounts with empty names remain readable.
-To change your own password, send `POST /api/users/me/password/` with
-`{"current_password":"Strong-unique-pass-123","new_password":"Another-strong-pass-456"}`
-and a valid access token. The current password must match; the new password
-must differ and pass the registration password policy. Success is HTTP 204 with
-an empty body. Missing, invalid, or extra fields return HTTP 400; missing
-authentication returns HTTP 401. Obtain new tokens using the new password.
-ADMIN may `GET /api/users/` and `PATCH /api/users/{id}/role/` with
-`{"roles":["PLANNER","TEACHER"]}`, `{"roles":["TEACHER"]}`,
-`{"roles":["PLANNER"]}`, or `{"roles":[]}`. The array is the complete
-membership set; an empty array sets VIEWER. It cannot contain VIEWER, ADMIN,
-duplicates, or unknown values. Send exactly one of `roles` or the legacy
-`role` field. Responses keep `role` for compatibility and include the complete
-`roles` array in ADMIN, PLANNER, TEACHER order. For a combined account,
-`"role":"PLANNER"` and `"roles":["PLANNER","TEACHER"]`.
-The legacy single-role requests are `{"role":"PLANNER"}`,
-`{"role":"TEACHER"}`, or `{"role":"VIEWER"}`.
-The ADMIN user list is paginated like the scheduling collections below.
-Promote an existing VIEWER with `{"role":"TEACHER"}`. An unassigned TEACHER
-may be demoted with `{"role":"VIEWER"}`. Switching directly between TEACHER
-and PLANNER using the legacy `role` field returns HTTP 409; transition through
-VIEWER or use `roles` to set the complete membership set. Removing TEACHER from
-an assigned user, including one retaining PLANNER, returns HTTP 409 with
-`{"detail":"Reassign or delete this teacher's lessons before removing TEACHER."}`.
-Removing only PLANNER from an assigned combined-role teacher succeeds.
-The same guard applies to Django Admin group editing. An authenticated account
-holder may `DELETE /api/users/{id}/` for their own account; ADMIN may delete
-another account. Other authenticated callers receive HTTP 403, and missing or
-invalid authentication returns HTTP 401. A successful deletion returns HTTP 204
-and removes the account immediately, so its tokens can no longer authorize
-requests. VIEWER, PLANNER, unassigned TEACHER, and unassigned combined-role
-accounts can be deleted without changing memberships first. Deleting any ADMIN
-account, including an ADMIN's own account, returns HTTP 409. Deleting a TEACHER
-with assigned lessons, including one who is also a PLANNER, returns HTTP 409;
-reassign or delete those lessons first. Django Admin account deletion keeps its
-existing, narrower rule: it allows only regular VIEWER accounts with neither
-PLANNER nor TEACHER membership.
+Otwórz `.env` i przed kontynuowaniem zastąp przykładowe wartości:
 
-## Scheduling access
+```dotenv
+DJANGO_SECRET_KEY=replace-with-your-own-long-random-secret
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=replace-with-your-own-strong-password
+```
 
-Authenticated VIEWER, TEACHER, PLANNER, combined-role, and ADMIN accounts can
-read scheduling data. PLANNER membership and ADMIN status allow create, update,
-and delete, including when the PLANNER also teaches. VIEWER and TEACHER-only
-writes return HTTP 403. Removing PLANNER immediately removes write access from
-existing tokens. Timetables are shared, so any PLANNER or ADMIN may edit them.
+`DJANGO_SECRET_KEY` jest wymagany do uruchomienia Django i podpisywania tokenów JWT. Początkowe dane logowania administratora są potrzebne przy tworzeniu pierwszego administratora. Użyj unikalnego hasła mającego co najmniej osiem znaków, w tym małe i wielkie litery, cyfrę oraz znak interpunkcyjny lub symbol; Django odrzuca także hasła popularne lub łatwe do odgadnięcia. Plik `.env` jest ignorowany przez Git. Istniejące systemowe zmienne środowiskowe mają pierwszeństwo przed wartościami z pliku. Domyślną lokalizacją bazy SQLite jest `db.sqlite3` w tym katalogu; jeśli potrzebujesz innej ścieżki, ustaw `DJANGO_DB_PATH`.
 
-All API paths end in `/` and exchange JSON. Scheduling collections support
-`GET` (200, paginated JSON object); all except the teacher directory support
-`POST` (201, created record). Each detail path appends an integer
-`id` and supports `GET`, `PUT`, and `PATCH` (200, JSON record), plus `DELETE`
-(204, empty body), except the read-only teacher detail path. The `id` field in
-every response is read-only.
+Utwórz tabele, początkowe role i konto, a następnie uruchom serwer:
 
-`GET /api/timetables/`, `/api/lessons/`, `/api/student-groups/`,
-`/api/subjects/`, `/api/teachers/`, `/api/rooms/`, and ADMIN-only
-`/api/users/` return `{"count":12,"next":"http://testserver/api/rooms/?page=2","previous":null,"results":[...]}`
-with the requested records in `results`. Clients that previously read a bare
-array must read `results`. The default page holds 10 records. Use `page` to
-select a page and `size` for a positive integer page size, for example
-`GET /api/rooms/?page=2&size=5`. Values above 100 are capped at 100;
-nonnumeric, zero, and negative sizes return HTTP 400 with a `size` error.
-`next` and `previous` are URLs or `null`, and preserve active query parameters.
+```sh
+python manage.py migrate
+python manage.py bootstrap_accounts
+python manage.py runserver
+```
 
-| Collection path | Writable request fields |
+Pozostaw terminal otwarty. Otwórz `http://127.0.0.1:8000/api/docs/`, aby skorzystać z interaktywnego API, `http://127.0.0.1:8000/api/schema/`, aby zobaczyć schemat OpenAPI, lub `http://127.0.0.1:8000/admin/`, aby skorzystać z panelu administracyjnego Django. Zatrzymaj serwer klawiszami Ctrl+C. Uruchom `migrate` po pobraniu zmian dodających migracje, a `bootstrap_accounts` po migracjach przy każdym uruchomieniu wdrożenia. Polecenie `bootstrap_accounts` tworzy grupy `PLANNER` i `TEACHER` oraz tworzy administratora tylko wtedy, gdy żaden nie istnieje; ponowne uruchomienie nie resetuje hasła istniejącego administratora. Ta konfiguracja ma `DEBUG=True` i jest przeznaczona do pracy lokalnej.
+
+## Pierwsze żądanie do API
+
+Wszystkie poniższe ścieżki API zaczynają się od `http://127.0.0.1:8000`, kończą się znakiem `/` i korzystają z formatu JSON. W interfejsie Swagger UI (`/api/docs/`):
+
+1. Otwórz `POST /api/register/`, kliknij **Try it out** i wyślij poniższy przykład, aby utworzyć konto `VIEWER`. Możesz też zalogować się danymi administratora z pliku `.env`.
+2. Otwórz `POST /api/token/` i wyślij nazwę użytkownika oraz hasło. Skopiuj wartość `access` z odpowiedzi.
+3. Kliknij **Authorize**, wklej token dostępu w polu `jwtAuth` i potwierdź. Swagger wysyła nagłówek `Authorization: Bearer <access token>` przy żądaniach wymagających uwierzytelnienia.
+4. Wypróbuj `GET /api/rooms/`. Aby tworzyć lub edytować dane planowania zajęć, zaloguj się jako `ADMIN` lub poproś administratora o przypisanie konta do grupy `PLANNER`.
+
+Treść żądania rejestracji:
+
+```json
+{"username":"Alice","password":"Strong-unique-pass-123!","first_name":"Alice","last_name":"Nowak"}
+```
+
+Treść żądania pobrania tokenu dla `POST /api/token/`:
+
+```json
+{"username":"alice","password":"Strong-unique-pass-123!"}
+```
+
+Odpowiedź z tokenami zawiera `access` i `refresh`. Tokeny dostępu tracą ważność; wyślij `{"refresh":"<refresh token>"}` do `POST /api/token/refresh/`, aby otrzymać nowy token dostępu. Klient HTTP może wysłać:
+
+```http
+GET /api/rooms/ HTTP/1.1
+Host: 127.0.0.1:8000
+Authorization: Bearer <access token>
+```
+
+## Konta i uprawnienia
+
+| Rola lub przynależność do grupy | Dostępne działania |
 | --- | --- |
-| `/api/timetables/` | `name`, optional `description` |
-| `/api/student-groups/` | `name`, `size` (positive integer) |
-| `/api/subjects/` | `name`, optional `description` |
-| `/api/teachers/` | Read-only directory of every TEACHER group member, including PLANNER and ADMIN teachers; no writable fields |
-| `/api/rooms/` | `name`, `capacity` (positive integer) |
-| `/api/lessons/` | `timetable`, `student_group`, `subject`, `room` (existing record IDs), `teacher` (TEACHER user ID); `weekday` (`MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, or `SUN`); `start_time`, `end_time` (for example, `09:00:00`) |
+| `VIEWER` | Odczyt danych planowania zajęć i zarządzanie własnym profilem. Jest to domyślna rola po rejestracji. |
+| `TEACHER` | Taki sam dostęp do odczytu; użytkownika można przypisywać do lekcji. |
+| `PLANNER` | Odczyt oraz tworzenie, aktualizowanie i usuwanie danych planowania zajęć. |
+| `ADMIN` | Wszystkie działania dotyczące planowania zajęć, wyświetlanie listy użytkowników i zmiana ról; dostęp do panelu administracyjnego Django. |
 
-Use `search` for case-insensitive partial matches on timetable, student group,
-and room `name`; subject `name` or `description`; and TEACHER member
-`first_name` or `last_name`. Search filters before pagination. For example,
-`GET /api/subjects/?search=biology&size=5&page=2` returns the second page of
-up to five matching subjects, with `count` and navigation URLs for the same
-search. Lessons and the ADMIN user list have no `search` filter.
+Konto może jednocześnie należeć do grup `PLANNER` i `TEACHER`. Administratorzy również mogą należeć do grupy `TEACHER`. Dane planowania zajęć są współdzielone: każdy planista lub administrator może edytować dowolny plan zajęć. Uprawnienia odzwierciedlają aktualne role także w przypadku wcześniej wydanych tokenów dostępu.
 
-`GET /api/teachers/` returns users such as
-`{"count":1,"next":null,"previous":null,"results":[{"id":7,"username":"alice","first_name":"Alice","last_name":"Nowak","role":"PLANNER","roles":["PLANNER","TEACHER"]}]}`.
-`GET /api/teachers/7/` returns the same object. An ADMIN teacher has
-`"role":"ADMIN"` and `"roles":["ADMIN","TEACHER"]`. Users without TEACHER
-membership are omitted and return HTTP 404 at the detail path. Teacher POST, PUT, PATCH, and DELETE return
-HTTP 405. Assign roles through the user role endpoint.
+| Punkt końcowy | Kto może korzystać | Cel i przykład |
+| --- | --- | --- |
+| `POST /api/register/` | Każdy | Utworzenie konta użytkownika `VIEWER`; użyj przedstawionej wyżej treści żądania rejestracji. |
+| `POST /api/token/` | Każdy | Uzyskanie tokenów dostępu i odświeżania na podstawie nazwy użytkownika i hasła. |
+| `POST /api/token/refresh/` | Każdy posiadacz tokenu odświeżania | Uzyskanie nowego tokenu dostępu. |
+| `GET /api/users/` | Administrator | Wyświetlenie listy kont z podziałem na strony. |
+| `GET /api/users/{id}/` | Dany użytkownik lub administrator | Odczyt danych konta. |
+| `PATCH /api/users/{id}/` | Dany użytkownik lub administrator | Edycja `username`, `first_name` lub `last_name`; na przykład `{"first_name":"Alicja"}`. |
+| `POST /api/users/me/password/` | Zalogowany użytkownik | Zmiana własnego hasła; wyślij `{"current_password":"Strong-unique-pass-123!","new_password":"Another-strong-pass-456!"}`. Zwraca 204; zaloguj się ponownie przy użyciu nowego hasła. |
+| `PATCH /api/users/{id}/role/` | Administrator | Zastąpienie przynależności do grup; na przykład `{"roles":["PLANNER","TEACHER"]}`. |
+| `DELETE /api/users/{id}/` | Dany użytkownik lub administrator | Usunięcie konta; zwraca 204. |
 
-For example, create a timetable with
-`POST /api/timetables/` and `{"name":"Autumn"}`. Create a lesson
-with `POST /api/lessons/` and a body such as:
+Żądanie zmiany ról musi zawierać dokładnie jedno z pól: `roles` albo starsze `role`. `{"roles":[]}` ustawia rolę `VIEWER`; `{"roles":["TEACHER"]}` i `{"roles":["PLANNER"]}` przyznają przynależność do jednej grupy. Starsza postać przyjmuje `{"role":"VIEWER"}`, `{"role":"TEACHER"}` lub `{"role":"PLANNER"}`. Odpowiedzi zawierają `role` (rolę główną) i `roles` (wszystkie role); konto z połączonymi rolami ma `"role":"PLANNER"` i `"roles":["PLANNER","TEACHER"]`. Nie można przypisać ani usunąć roli `ADMIN` przez ten punkt końcowy ani usunąć roli `TEACHER` użytkownikowi z przypisanymi lekcjami. Najpierw przypisz te lekcje komuś innemu lub je usuń. Usunięcie administratora lub nauczyciela z przypisanymi lekcjami również zwraca 409. Bezpośrednia zmiana roli nauczyciela na planistę lub odwrotnie za pomocą starszego, pojedynczego pola `role` zwraca 409; użyj `roles`, aby ustawić zamierzone przynależności do grup.
+
+Nazwy użytkowników zawierają tylko litery, cyfry dziesiętne i znaki podkreślenia (maksymalnie 150 znaków). Są normalizowane i porównywane bez rozróżniania wielkości liter, więc `Alice` i `alice` odnoszą się do tego samego konta. Imię i nazwisko są wymagane przy rejestracji, zawierają wyłącznie litery i są zapisywane z wielką pierwszą literą. Nowe hasła muszą spełniać wymagania z sekcji dotyczącej konfiguracji. Żądania dotyczące kont nie przyjmują adresu e-mail; odpowiedzi nie zawierają adresu e-mail ani haseł. Edycja profilu nie pozwala zmieniać haseł ani ról.
+
+## API planowania zajęć
+
+Uwierzytelnieni użytkownicy mogą odczytywać wszystkie kolekcje i poszczególne rekordy. Użytkownicy `PLANNER` i `ADMIN` mogą tworzyć rekordy, całkowicie je zastępować (`PUT`), częściowo aktualizować (`PATCH`) i usuwać, z wyjątkiem nauczycieli. Lista nauczycieli służy wyłącznie do odczytu; przypisz rolę `TEACHER` przez opisany wyżej punkt końcowy ról. Ścieżka kolekcji kończy się znakiem `/`; aby wskazać jeden element, dodaj jego ID, na przykład `GET /api/rooms/1/`. ID w odpowiedziach są tylko do odczytu.
+
+| Kolekcja | Co przechowuje | Przykładowa treść żądania `POST` |
+| --- | --- | --- |
+| `/api/timetables/` | Plan zajęć z nazwą i opcjonalnym opisem. | `{"name":"Autumn","description":"Term 1"}` |
+| `/api/student-groups/` | Grupę uczniów i jej dodatnią liczebność `size`. | `{"name":"Class 1A","size":25}` |
+| `/api/subjects/` | Przedmiot z opcjonalnym opisem. | `{"name":"Biology","description":"Lab and theory"}` |
+| `/api/rooms/` | Salę i jej dodatnią pojemność `capacity`. | `{"name":"Room 101","capacity":30}` |
+| `/api/teachers/` | Użytkowników należących do grupy `TEACHER`, w tym nauczycieli z połączonymi rolami oraz administratorów będących nauczycielami. | Tylko odczyt: `GET /api/teachers/` lub `/api/teachers/{id}/`. |
+| `/api/lessons/` | Cotygodniową lekcję łączącą powyższe rekordy z nauczycielem, dniem i godziną. | Zobacz przykład poniżej. |
+
+Na przykład utwórz plan zajęć za pomocą `POST /api/timetables/` i `{"name":"Autumn"}`, a następnie użyj zwróconego `id` w lekcji. Najpierw utwórz grupę uczniów, przedmiot i salę oraz poproś administratora o przypisanie użytkownikowi roli `TEACHER`. `GET /api/teachers/` pokazuje ID nauczycieli, których można przypisać. Gdy te rekordy już istnieją, wyślij poniższą treść do `POST /api/lessons/`:
 
 ```json
 {
@@ -176,93 +134,20 @@ with `POST /api/lessons/` and a body such as:
 }
 ```
 
-Relations, including `teacher`, are returned as IDs. A missing, nonexistent, or
-user ID without TEACHER membership in `teacher` returns HTTP 400 with a `teacher`
-field error. A PLANNER or ADMIN with TEACHER membership is eligible.
-Other missing or nonexistent related IDs return
-HTTP 400 with errors keyed by field, such as `{"room":["Invalid pk ..."]}`.
-Invalid lesson intervals return an `end_time` error; overlapping room, teacher,
-or student group bookings return an error keyed by the conflicting resource.
-Unexpected concurrent conflicts caught by the SQLite scheduling trigger return
-HTTP 400 with `non_field_errors`.
+Zastąp przykładowe ID wartościami z własnych odpowiedzi. Dozwolone dni tygodnia to `MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT` i `SUN`. Godzina zakończenia musi być późniejsza niż godzina rozpoczęcia. Lekcje nie mogą nakładać się w tym samym dniu dla tej samej sali, tego samego nauczyciela lub tej samej grupy uczniów, nawet w różnych planach zajęć. Zaktualizuj lekcję za pomocą `PATCH /api/lessons/{id}/`, na przykład `{"room":2}`, albo usuń ją za pomocą `DELETE /api/lessons/{id}/`.
 
-Missing records and unknown `/api/` paths return HTTP 404 with a JSON `detail`
-message. Unsupported methods return HTTP 405 with the method named in `detail`.
-Deleting a student group, subject, or room used by a lesson returns
-HTTP 409 with a `detail` message explaining that related lessons prevent
-deletion. Deleting a timetable removes its lessons as well.
+### Listy, wyszukiwanie i błędy
 
-### Owner removal migration
+Odpowiedzi dla wszystkich kolekcji, w tym lista użytkowników dostępna administratorowi, są dzielone na strony:
 
-`Timetable.owner` has been removed from storage and JSON. Clients must stop
-sending or expecting `owner`; POST, PUT, and PATCH with that field return HTTP
-400. Existing timetable and lesson rows survive migration 0002, but owner IDs
-are discarded. Back up the SQLite database before migrating if those IDs are
-needed for historical records. Existing clients must obtain a JWT before using
-scheduling or user routes.
+```json
+{"count":12,"next":"http://127.0.0.1:8000/api/rooms/?page=2","previous":null,"results":[{"id":1,"name":"Room 101","capacity":30}]}
+```
 
-### Teacher replacement migration
+Odczytuj rekordy z pola `results`. Domyślnie strony zawierają 10 rekordów. Użyj `?page=2&size=5`; `size` musi być dodatnie i nie może przekraczać 100. Użyj `search` do wyszukiwania częściowych dopasowań bez rozróżniania wielkości liter: w nazwach planów zajęć, grup uczniów i sal; w nazwie lub opisie przedmiotu; oraz w imionach lub nazwiskach nauczycieli. Na przykład `GET /api/subjects/?search=biology&size=5`. Lekcje i użytkownicy nie mają filtra wyszukiwania.
 
-Migration 0003 **discards every row in `timetables_teacher` and
-`timetables_lesson`** and recreates the lesson table with `teacher_id` pointing
-to the configured User table. User accounts, timetables, student groups,
-subjects, and rooms are unaffected. Back up the SQLite database before
-running `python manage.py migrate` if old teacher or lesson data might be
-needed. Run `python manage.py bootstrap_accounts` afterward to create the
-TEACHER group. To roll back, restore the database backup together with the
-pre-migration application code; reversing the migration cannot recover the
-discarded rows. Existing clients must use TEACHER user IDs in lesson payloads.
+Typowe odpowiedzi to 200 przy odczycie i aktualizacji, 201 przy tworzeniu oraz 204 bez treści przy usuwaniu lub pomyślnej zmianie hasła. Nieprawidłowe pola, ID, godziny i konflikty rezerwacji zwracają 400 z błędami pól; brak uwierzytelnienia lub nieprawidłowe uwierzytelnienie zwraca 401; niewystarczające uprawnienia zwracają 403; brakujące rekordy zwracają 404; nieobsługiwane metody zwracają 405. Sali, przedmiotu ani grupy uczniów używanych przez lekcję nie można usunąć, dopóki powiązane lekcje nie zostaną przypisane inaczej lub usunięte (409). Usunięcie planu zajęć usuwa również jego lekcje.
 
-### Email-free user migration
+## Istniejące bazy danych
 
-Fresh databases need only `python manage.py migrate` followed by
-`python manage.py bootstrap_accounts`. The active user table is `auth_user`,
-without an email column. Registration and profile requests containing email
-return HTTP 400, and account and teacher responses omit it.
-
-For an existing SQLite database already migrated through `timetables.0003`,
-stop all writers. With the new code and environment loaded, run
-`python manage.py prepare_user_migration --backup path/to/backup.sqlite3`
-before `python manage.py migrate`. The command checks the expected legacy
-tables, columns, migration history, and foreign keys, creates a new backup,
-and records the compatible custom user initial migration. It is safe to rerun
-after that migration has been recorded. Run `python manage.py migrate`, then
-`python manage.py bootstrap_accounts`, and restart the application. Existing
-account IDs, password hashes, roles, permissions, and lesson references remain;
-stored email values are discarded. To roll back, restore the backup together
-with the previous application code. Reversing the email removal migration is
-unsupported.
-
-### Canonical username migration
-
-Before deploying the username change, stop account writers and back up the
-database. Inspect existing usernames using Django's NFKC normalization followed
-by Unicode `casefold()`. Accounts that produce the same canonical name, or a
-canonical name that fails the username syntax or 150-character limit, must be
-renamed to distinct valid names. Run `python manage.py migrate`. Migration
-`accounts.0003_canonical_usernames` preflights every account before changing
-any row. If it finds a problem, it stops with `Cannot canonicalize usernames`
-and reports each affected account ID and current username. Correct those rows
-manually and rerun `python manage.py migrate`; the failed attempt changes no
-usernames. Successful migration preserves account IDs, password hashes,
-privileges, group memberships, and lesson references. Returned account and
-teacher usernames use the canonical lowercase form. Future bulk imports that
-bypass model saves must apply the same normalization and validation before
-writing usernames. Restoring the old casing requires the database backup.
-
-### Account format transition
-
-Before deploying the new account rules to an existing database, stop account
-writers and back up the database. Inspect usernames for spaces, punctuation,
-or other characters outside Unicode letters, decimal digits, and underscores.
-Inspect nonempty first and last names for digits, spaces, hyphens, apostrophes,
-or other nonletters. Correct invalid values while preserving account IDs and
-relationships; choose unique canonical usernames. Then run
-`python manage.py migrate`. Migration `accounts.0005_account_name_preflight`
-reports each invalid account ID and field and makes no account changes if any
-are found. Correct the reported values and rerun migration. On success it
-capitalizes valid nonempty names, leaves legacy empty names empty, and retains
-password hashes, privileges, memberships, and lesson references. New passwords
-are checked when set; existing hashes do not need conversion. Bulk database
-writes bypass application validation, so validate imported account data before
-writing it. Roll back with the matching application version and database backup.
+Powyższe kroki konfiguracji dotyczą nowej bazy danych SQLite. Przed zastosowaniem migracji wykonaj kopię zapasową istniejącej bazy danych. Jeśli baza powstała przed wprowadzeniem niestandardowego modelu użytkownika i została już zmigrowana do `timetables.0003`, wstrzymaj zapisy i uruchom `python manage.py prepare_user_migration --backup path/to/backup.sqlite3` przed `migrate`. Pozwoli to zachować ID kont i powiązania lekcji przy usunięciu zapisanych adresów e-mail. Sama migracja `timetables.0003` zastępuje starą tabelę nauczycieli i **usuwa stare wiersze nauczycieli i lekcji**, dlatego zachowaj kopię zapasową, jeśli aktualizujesz projekt z wcześniejszej wersji. Późniejsze migracje kont mogą się zatrzymać, gdy istniejące nazwy użytkowników lub imiona i nazwiska naruszają obecne reguły; popraw wskazane rekordy i ponownie uruchom `migrate`. Po migracji uruchom `bootstrap_accounts`.
