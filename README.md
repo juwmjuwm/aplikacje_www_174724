@@ -23,6 +23,22 @@ The value in `.env.example` is illustrative and must be replaced before use.
 
 ## Authentication and users
 
+### Swagger API reference
+
+Start the Django server and open `http://127.0.0.1:8000/api/docs/` for Swagger UI.
+The generated OpenAPI 3.0 schema is available at
+`http://127.0.0.1:8000/api/schema/`. Both pages are public; API permissions
+still apply to protected requests.
+
+To try a protected request, first use `POST /api/register/` to create a VIEWER
+account if needed. In Swagger UI, open `POST /api/token/`, select **Try it out**,
+enter that account's `username` and `password`, and select **Execute**. Copy the
+`access` value from the response. Select **Authorize** at the top of the page,
+paste the access token into the `jwtAuth` field, and confirm. Swagger UI sends
+it as `Authorization: Bearer <access token>` on protected operations. Try
+`GET /api/rooms/` to confirm access. When the access token expires, use
+`POST /api/token/refresh/` with the `refresh` value to get a new one.
+
 Register a VIEWER with `POST /api/register/` and
 `{"username":"Alice","password":"Strong-unique-pass-123","first_name":"Alice","last_name":"Nowak"}`.
 Both names are required, trimmed, and must contain only Unicode letters.

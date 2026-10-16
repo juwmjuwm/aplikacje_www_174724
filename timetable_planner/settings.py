@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'accounts',
     'rest_framework',
+    'drf_spectacular',
+    'drf_spectacular_sidecar',
     'timetables.apps.TimetablesConfig',
 ]
 
@@ -50,12 +52,26 @@ AUTH_USER_MODEL = 'accounts.User'
 AUTHENTICATION_BACKENDS = ['accounts.backends.CanonicalUsernameBackend']
 
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'The Timetabler API',
+    'DESCRIPTION': 'Account and scheduling API.',
+    'VERSION': '1.0.0',
+    'OAS_VERSION': '3.0.3',
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
+    'SWAGGER_UI_DIST': 'SIDECAR',
+    'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
+    'PREPROCESSING_HOOKS': ['timetable_planner.schema.canonical_api_endpoints'],
 }
 
 MIDDLEWARE = [

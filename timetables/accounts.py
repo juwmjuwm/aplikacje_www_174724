@@ -10,6 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiResponse
 
 from .permissions import IsAdmin, IsSelfOrAdmin, user_role, user_roles
 from .models import Lesson, lock_teacher_assignment
@@ -72,10 +73,10 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'username', 'first_name', 'last_name', 'role', 'roles')
 
-    def get_role(self, obj):
+    def get_role(self, obj) -> str:
         return user_role(obj)
 
-    def get_roles(self, obj):
+    def get_roles(self, obj) -> list[str]:
         return user_roles(obj)
 
 
@@ -133,6 +134,14 @@ class PasswordChangeSerializer(StrictFieldsMixin, serializers.Serializer):
 class PasswordChangeView(APIView):
     permission_classes = (IsAuthenticated,)
 
+    @extend_schema(
+        request=PasswordChangeSerializer,
+        responses={
+            204: None,
+            400: OpenApiResponse(description='Invalid password change request.'),
+            401: OpenApiResponse(description='Authentication required.'),
+        },
+    )
     def post(self, request):
         serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
@@ -156,6 +165,16 @@ class RoleSerializer(StrictFieldsMixin, serializers.Serializer):
         return attrs
 
 
+@extend_schema_view(
+    post=extend_schema(
+        request=RegisterSerializer,
+        responses={
+            201: UserSerializer,
+            400: OpenApiResponse(description='Invalid registration fields or username conflict.'),
+        },
+        auth=[],
+    ),
+)
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = (AllowAny,)
@@ -186,6 +205,15 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             return [IsAuthenticated(), IsAdmin()]
         return [IsAuthenticated(), IsSelfOrAdmin()]
 
+    @extend_schema(
+        request=ProfileSerializer,
+        responses={
+            200: UserSerializer,
+            400: OpenApiResponse(description='Invalid profile fields or username conflict.'),
+            401: OpenApiResponse(description='Authentication required.'),
+            403: OpenApiResponse(description='Account access denied.'),
+        },
+    )
     def partial_update(self, request, *args, **kwargs):
         user = self.get_object()
         serializer = ProfileSerializer(user, data=request.data, partial=True)
@@ -199,6 +227,16 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             raise serializers.ValidationError({'username': ['A user with that username already exists.']}) from exc
         return Response(UserSerializer(user).data)
 
+    @extend_schema(
+        request=RoleSerializer,
+        responses={
+            200: UserSerializer,
+            400: OpenApiResponse(description='Invalid role selection.'),
+            401: OpenApiResponse(description='Authentication required.'),
+            403: OpenApiResponse(description='ADMIN role required.'),
+            409: OpenApiResponse(description='Role transition conflicts with account or lesson assignments.'),
+        },
+    )
     @action(detail=True, methods=['patch'])
     def role(self, request, pk=None):
         self.get_object()
