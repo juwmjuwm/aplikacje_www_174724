@@ -222,3 +222,6 @@ __marimo__/
 
 # Inne pliki konfiguracyjne IDE
 *.swp
+
+# Tymczasowe
+temp/
