@@ -56,11 +56,18 @@ VIEWER or use `roles` to set the complete membership set. Removing TEACHER from
 an assigned user, including one retaining PLANNER, returns HTTP 409 with
 `{"detail":"Reassign or delete this teacher's lessons before removing TEACHER."}`.
 Removing only PLANNER from an assigned combined-role teacher succeeds.
-The same guard applies to Django Admin group editing. Only ADMIN may
-`DELETE /api/users/{id}/`, and only when the regular target has neither
-membership. A PLANNER, TEACHER, or combined-role user must first have their
-memberships removed. Deleting PLANNER, TEACHER, combined-role, or ADMIN accounts returns HTTP 409;
-other users receive HTTP 403. Deleted accounts lose access immediately.
+The same guard applies to Django Admin group editing. An authenticated account
+holder may `DELETE /api/users/{id}/` for their own account; ADMIN may delete
+another account. Other authenticated callers receive HTTP 403, and missing or
+invalid authentication returns HTTP 401. A successful deletion returns HTTP 204
+and removes the account immediately, so its tokens can no longer authorize
+requests. VIEWER, PLANNER, unassigned TEACHER, and unassigned combined-role
+accounts can be deleted without changing memberships first. Deleting any ADMIN
+account, including an ADMIN's own account, returns HTTP 409. Deleting a TEACHER
+with assigned lessons, including one who is also a PLANNER, returns HTTP 409;
+reassign or delete those lessons first. Django Admin account deletion keeps its
+existing, narrower rule: it allows only regular VIEWER accounts with neither
+PLANNER nor TEACHER membership.
 
 ## Scheduling access
 

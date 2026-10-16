@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from rest_framework import generics, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -128,7 +129,7 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
     http_method_names = ('get', 'patch', 'delete', 'head', 'options')
 
     def get_permissions(self):
-        if self.action in ('list', 'role', 'destroy'):
+        if self.action in ('list', 'role'):
             return [IsAuthenticated(), IsAdmin()]
         return [IsAuthenticated(), IsSelfOrAdmin()]
 
@@ -172,9 +173,15 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
     def destroy(self, request, *args, **kwargs):
         self.get_object()
-        with transaction.atomic():
-            user = User.objects.select_for_update().get(pk=kwargs['pk'])
-            if user.is_superuser or user_roles(user) != ['VIEWER']:
-                return Response({'detail': 'Only VIEWER accounts may be deleted.'}, status=status.HTTP_409_CONFLICT)
-            user.delete()
+        try:
+            with transaction.atomic():
+                lock_teacher_assignment(kwargs['pk'])
+                user = User.objects.select_for_update().get(pk=kwargs['pk'])
+                if user.is_superuser:
+                    return Response({'detail': 'ADMIN accounts cannot be deleted.'}, status=status.HTTP_409_CONFLICT)
+                if Lesson.objects.filter(teacher=user).exists():
+                    return Response({'detail': 'Reassign or delete this teacher\'s lessons before deleting the account.'}, status=status.HTTP_409_CONFLICT)
+                user.delete()
+        except ProtectedError:
+            return Response({'detail': 'Related lessons prevent deletion of this account.'}, status=status.HTTP_409_CONFLICT)
         return Response(status=status.HTTP_204_NO_CONTENT)
