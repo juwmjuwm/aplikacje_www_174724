@@ -37,5 +37,8 @@ class Command(BaseCommand):
                 return
             if not username or not password:
                 raise CommandError('INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD are required when no ADMIN exists.')
-            User.objects.create_superuser(username=username, password=password)
+            try:
+                User.objects.create_superuser(username=username, password=password)
+            except ValidationError as exc:
+                raise CommandError(f'Invalid INITIAL_ADMIN_PASSWORD: {exc}') from exc
             self.stdout.write('Initial ADMIN created.')

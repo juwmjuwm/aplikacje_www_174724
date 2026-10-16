@@ -1,5 +1,4 @@
 from django.contrib.auth.base_user import AbstractBaseUser
-from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.core.exceptions import ValidationError
 
 
@@ -8,10 +7,11 @@ def canonical_username(username):
 
 
 def validate_username(username):
-    validator = UnicodeUsernameValidator()
-    validator(username)
+    if not username or not all(character.isalpha() or character.isdecimal() or character == '_' for character in username):
+        raise ValidationError('Enter a valid username. Use letters, decimal digits, and underscores only.')
     canonical = canonical_username(username)
     if len(username) > 150 or len(canonical) > 150:
         raise ValidationError('Ensure this value has at most 150 characters.')
-    validator(canonical)
+    if not canonical or not all(character.isalpha() or character.isdecimal() or character == '_' for character in canonical):
+        raise ValidationError('Enter a valid username. Use letters, decimal digits, and underscores only.')
     return canonical

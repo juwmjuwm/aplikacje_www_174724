@@ -17,20 +17,29 @@ already held by a regular user, cause a clear error.
 `INITIAL_ADMIN_USERNAME` is canonicalized with Unicode NFKC and case folding:
 `ADMIN` creates or finds `admin`. Repeated bootstrap runs preserve an existing
 ADMIN's password and privileges, even when the configured casing changes.
+Choose a unique initial password with at least eight characters, including a
+lowercase letter, uppercase letter, decimal digit, and punctuation or symbol.
+The value in `.env.example` is illustrative and must be replaced before use.
 
 ## Authentication and users
 
 Register a VIEWER with `POST /api/register/` and
 `{"username":"Alice","password":"Strong-unique-pass-123","first_name":"Alice","last_name":"Nowak"}`.
-Both names are required and must contain non-whitespace characters; they are
-trimmed before storage. Registration validates passwords and rejects email and
+Both names are required, trimmed, and must contain only Unicode letters.
+Accepted names are stored with the first letter uppercase and the rest lowercase.
+Registration validates passwords and rejects email and
 privilege fields. A response is
 `{"id":7,"username":"alice","first_name":"Alice","last_name":"Nowak","role":"VIEWER","roles":["VIEWER"]}`.
 Account responses omit email and passwords.
 Usernames are normalized with Unicode NFKC and case folding before storage;
 the lowercase value in the response is authoritative. Registering `ALICE`
 after `alice` exists returns HTTP 400 with a `username` error and creates no
-account.
+account. Usernames may contain only Unicode letters, Unicode decimal digits,
+and underscores, with at most 150 characters before and after normalization.
+Spaces, hyphens, periods, and at signs are rejected. New passwords must have
+at least eight characters and a Unicode lowercase letter, uppercase letter,
+decimal digit, and punctuation or symbol. Whitespace does not count as a
+special character. Existing passwords remain usable until changed.
 
 Obtain tokens with `POST /api/token/` and
 `{"username":"ALICE","password":"Strong-unique-pass-123"}`. Username input
@@ -45,7 +54,7 @@ The account holder or ADMIN may `GET` or `PATCH /api/users/{id}/`. PATCH accepts
 `{"username":"ALICE","first_name":"Alicja"}`. This succeeds for `alice`
 and returns `"username":"alice"`; a different account's canonical username
 returns HTTP 400 with a `username` error and leaves the profile unchanged.
-Submitted names are trimmed and cannot be blank;
+Submitted names are trimmed, cannot be blank, and may contain only Unicode letters;
 omitted fields stay unchanged. Email, password, and privilege fields return
 HTTP 400. The response includes both names, `role`, and `roles`, and omits
 email and passwords. Existing accounts with empty names remain readable.
@@ -224,3 +233,20 @@ privileges, group memberships, and lesson references. Returned account and
 teacher usernames use the canonical lowercase form. Future bulk imports that
 bypass model saves must apply the same normalization and validation before
 writing usernames. Restoring the old casing requires the database backup.
+
+### Account format transition
+
+Before deploying the new account rules to an existing database, stop account
+writers and back up the database. Inspect usernames for spaces, punctuation,
+or other characters outside Unicode letters, decimal digits, and underscores.
+Inspect nonempty first and last names for digits, spaces, hyphens, apostrophes,
+or other nonletters. Correct invalid values while preserving account IDs and
+relationships; choose unique canonical usernames. Then run
+`python manage.py migrate`. Migration `accounts.0005_account_name_preflight`
+reports each invalid account ID and field and makes no account changes if any
+are found. Correct the reported values and rerun migration. On success it
+capitalizes valid nonempty names, leaves legacy empty names empty, and retains
+password hashes, privileges, memberships, and lesson references. New passwords
+are checked when set; existing hashes do not need conversion. Bulk database
+writes bypass application validation, so validate imported account data before
+writing it. Roll back with the matching application version and database backup.

@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from accounts.usernames import validate_username
+from accounts.names import normalize_name
 
 from .models import Lesson, Room, StudentGroup, Subject, Timetable, lock_teacher_assignment
 from .permissions import user_roles
@@ -27,6 +28,12 @@ class CanonicalUsernameFormMixin:
         if matches.exists():
             raise ValidationError('A user with that username already exists.')
         return username
+
+    def clean_first_name(self):
+        return normalize_name(self.cleaned_data['first_name'])
+
+    def clean_last_name(self):
+        return normalize_name(self.cleaned_data['last_name'])
 
 
 class SafeUserCreationForm(CanonicalUsernameFormMixin, AdminUserCreationForm):

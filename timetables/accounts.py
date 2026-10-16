@@ -15,6 +15,7 @@ from .permissions import IsAdmin, IsSelfOrAdmin, user_role, user_roles
 from .models import Lesson, lock_teacher_assignment
 from .pagination import CollectionPagination
 from accounts.usernames import validate_username
+from accounts.names import normalize_name
 
 User = get_user_model()
 
@@ -49,6 +50,20 @@ class StrictFieldsMixin:
         return super().to_internal_value(data)
 
 
+class NameFieldsMixin:
+    def validate_first_name(self, value):
+        try:
+            return normalize_name(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+
+    def validate_last_name(self, value):
+        try:
+            return normalize_name(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+
+
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     roles = serializers.SerializerMethodField()
@@ -64,7 +79,7 @@ class UserSerializer(serializers.ModelSerializer):
         return user_roles(obj)
 
 
-class RegisterSerializer(CanonicalUsernameMixin, StrictFieldsMixin, serializers.ModelSerializer):
+class RegisterSerializer(CanonicalUsernameMixin, NameFieldsMixin, StrictFieldsMixin, serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     first_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
     last_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
@@ -89,7 +104,7 @@ class RegisterSerializer(CanonicalUsernameMixin, StrictFieldsMixin, serializers.
         return User.objects.create_user(**validated_data)
 
 
-class ProfileSerializer(CanonicalUsernameMixin, StrictFieldsMixin, serializers.ModelSerializer):
+class ProfileSerializer(CanonicalUsernameMixin, NameFieldsMixin, StrictFieldsMixin, serializers.ModelSerializer):
     first_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
     last_name = serializers.CharField(allow_blank=False, trim_whitespace=True)
 

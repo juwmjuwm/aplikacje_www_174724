@@ -1,7 +1,18 @@
 from django.db import migrations
 from django.core.exceptions import ValidationError
+from django.contrib.auth.base_user import AbstractBaseUser
+from django.contrib.auth.validators import UnicodeUsernameValidator
 
-from accounts.usernames import validate_username
+
+def validate_username(username):
+    """Keep the username rules in effect when this migration was written."""
+    validator = UnicodeUsernameValidator()
+    validator(username)
+    canonical = AbstractBaseUser.normalize_username(username).casefold()
+    if len(username) > 150 or len(canonical) > 150:
+        raise ValidationError('Ensure this value has at most 150 characters.')
+    validator(canonical)
+    return canonical
 
 
 def canonicalize_usernames(apps, schema_editor):
