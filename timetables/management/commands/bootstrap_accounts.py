@@ -7,7 +7,7 @@ from django.db import transaction
 
 
 class Command(BaseCommand):
-    help = 'Create the PLANNER group and initial ADMIN after migrations.'
+    help = 'Create the PLANNER and TEACHER groups and initial ADMIN after migrations.'
 
     def handle(self, *args, **options):
         username = os.getenv('INITIAL_ADMIN_USERNAME', '').strip()
@@ -16,6 +16,7 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             Group.objects.get_or_create(name='PLANNER')
+            Group.objects.get_or_create(name='TEACHER')
             if username:
                 existing = User.objects.select_for_update().filter(username=username).first()
                 if existing:

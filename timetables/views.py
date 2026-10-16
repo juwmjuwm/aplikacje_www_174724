@@ -1,14 +1,16 @@
+from django.contrib.auth import get_user_model
 from django.db.models.deletion import ProtectedError
 from django.http import HttpResponse, JsonResponse
 from rest_framework import status, viewsets
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
-from .models import Lesson, Room, StudentGroup, Subject, Teacher, Timetable
+from .accounts import UserSerializer
+from .models import Lesson, Room, StudentGroup, Subject, Timetable
 from .permissions import SchedulingPermission
 from .serializers import (
     LessonSerializer, RoomSerializer, StudentGroupSerializer,
-    SubjectSerializer, TeacherSerializer, TimetableSerializer,
+    SubjectSerializer, TimetableSerializer,
 )
 
 
@@ -41,9 +43,11 @@ class SubjectViewSet(JsonModelViewSet):
     serializer_class = SubjectSerializer
 
 
-class TeacherViewSet(JsonModelViewSet):
-    queryset = Teacher.objects.all()
-    serializer_class = TeacherSerializer
+class TeacherViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = get_user_model().objects.filter(groups__name='TEACHER', is_superuser=False).exclude(groups__name='PLANNER').distinct().order_by('pk')
+    serializer_class = UserSerializer
+    renderer_classes = (JSONRenderer,)
+    permission_classes = (SchedulingPermission,)
 
 
 class RoomViewSet(JsonModelViewSet):

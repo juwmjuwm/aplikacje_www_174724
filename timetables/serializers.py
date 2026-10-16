@@ -1,8 +1,9 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection
 from rest_framework import serializers
 
-from .models import Lesson, Room, StudentGroup, Subject, Teacher, Timetable
+from .models import Lesson, Room, StudentGroup, Subject, Timetable
 
 
 class TimetableSerializer(serializers.ModelSerializer):
@@ -31,13 +32,6 @@ class SubjectSerializer(serializers.ModelSerializer):
         read_only_fields = ("id",)
 
 
-class TeacherSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Teacher
-        fields = ("id", "first_name", "last_name", "academic_title", "email")
-        read_only_fields = ("id",)
-
-
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Room
@@ -46,6 +40,9 @@ class RoomSerializer(serializers.ModelSerializer):
 
 
 class LessonSerializer(serializers.ModelSerializer):
+    teacher = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.filter(
+        groups__name='TEACHER', is_superuser=False,
+    ).exclude(groups__name='PLANNER').distinct())
     class Meta:
         model = Lesson
         fields = (

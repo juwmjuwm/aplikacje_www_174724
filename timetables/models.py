@@ -1,6 +1,7 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import connection, models, transaction
 
 
 class Timetable(models.Model):
@@ -42,21 +43,6 @@ class Subject(models.Model):
         return self.name
 
 
-class Teacher(models.Model):
-    first_name = models.CharField(max_length=50)
-    last_name = models.CharField(max_length=50)
-    academic_title = models.CharField(max_length=10, blank=True, default="")
-    email = models.EmailField(blank=True, default="")
-
-    class Meta:
-        ordering = ("last_name", "first_name", "pk")
-        verbose_name = "teacher"
-        verbose_name_plural = "teachers"
-
-    def __str__(self):
-        return " ".join(part for part in (self.academic_title, self.first_name, self.last_name) if part)
-
-
 class Room(models.Model):
     name = models.CharField(max_length=50)
     capacity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
@@ -83,7 +69,7 @@ class Lesson(models.Model):
     timetable = models.ForeignKey(Timetable, on_delete=models.CASCADE, related_name="lessons")
     student_group = models.ForeignKey(StudentGroup, on_delete=models.PROTECT, related_name="lessons")
     subject = models.ForeignKey(Subject, on_delete=models.PROTECT, related_name="lessons")
-    teacher = models.ForeignKey(Teacher, on_delete=models.PROTECT, related_name="lessons")
+    teacher = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="lessons")
     room = models.ForeignKey(Room, on_delete=models.PROTECT, related_name="lessons")
     weekday = models.CharField(max_length=3, choices=Weekday.choices)
     start_time = models.TimeField()
@@ -100,6 +86,10 @@ class Lesson(models.Model):
     def clean(self):
         super().clean()
         errors = {}
+        if self.teacher_id is not None:
+            from .permissions import user_role
+            if user_role(self.teacher) != 'TEACHER':
+                errors['teacher'] = 'Teacher must have the TEACHER role.'
         if self.start_time is not None and self.end_time is not None:
             if self.end_time <= self.start_time:
                 errors["end_time"] = "End time must be later than start time."
@@ -123,5 +113,16 @@ class Lesson(models.Model):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        self.full_clean()
-        return super().save(*args, **kwargs)
+        with transaction.atomic():
+            lock_teacher_assignment(self.teacher_id)
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+
+def lock_teacher_assignment(user_id):
+    """Acquire SQLite's writer lock before checking role or lesson assignment."""
+    if user_id is not None and connection.vendor == 'sqlite':
+        from django.contrib.auth import get_user_model
+        user_table = connection.ops.quote_name(get_user_model()._meta.db_table)
+        with connection.cursor() as cursor:
+            cursor.execute(f'UPDATE {user_table} SET last_login = last_login WHERE id = %s', [user_id])

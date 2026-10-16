@@ -8,6 +8,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .permissions import IsAdmin, IsSelfOrAdmin, user_role
+from .models import Lesson, lock_teacher_assignment
 
 User = get_user_model()
 
@@ -57,7 +58,7 @@ class ProfileSerializer(StrictFieldsMixin, serializers.ModelSerializer):
 
 
 class RoleSerializer(StrictFieldsMixin, serializers.Serializer):
-    role = serializers.ChoiceField(choices=('VIEWER', 'PLANNER'))
+    role = serializers.ChoiceField(choices=('VIEWER', 'PLANNER', 'TEACHER'))
 
 
 class RegisterView(generics.CreateAPIView):
@@ -96,14 +97,26 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         serializer = RoleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
+            lock_teacher_assignment(pk)
             user = User.objects.select_for_update().get(pk=pk)
             if user.is_superuser:
                 return Response({'detail': 'ADMIN role cannot be changed.'}, status=status.HTTP_409_CONFLICT)
+            current_role = user_role(user)
+            target_role = serializer.validated_data['role']
+            if {current_role, target_role} == {'TEACHER', 'PLANNER'}:
+                return Response({'detail': 'Switch between TEACHER and PLANNER through VIEWER.'}, status=status.HTTP_409_CONFLICT)
+            if current_role == 'TEACHER' and target_role != 'TEACHER' and Lesson.objects.filter(teacher=user).exists():
+                return Response({'detail': 'Reassign or delete this teacher\'s lessons before removing TEACHER.'}, status=status.HTTP_409_CONFLICT)
             planner, _ = Group.objects.get_or_create(name='PLANNER')
-            if serializer.validated_data['role'] == 'PLANNER':
+            teacher, _ = Group.objects.get_or_create(name='TEACHER')
+            if target_role == 'PLANNER':
                 user.groups.add(planner)
             else:
                 user.groups.remove(planner)
+            if target_role == 'TEACHER':
+                user.groups.add(teacher)
+            else:
+                user.groups.remove(teacher)
         return Response(UserSerializer(user).data)
 
     def destroy(self, request, *args, **kwargs):

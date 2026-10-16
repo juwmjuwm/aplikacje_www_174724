@@ -10,7 +10,7 @@ by Git; existing host environment variables take precedence.
 
 Run `python manage.py migrate`, then `python manage.py bootstrap_accounts`, then
 `python manage.py runserver`. Run bootstrap after migrations on each deployment
-start. It creates the `PLANNER` group and, if none exists, an ADMIN superuser
+start. It creates the `PLANNER` and `TEACHER` groups and, if none exists, an ADMIN superuser
 from the initial credentials. Repeated runs preserve its password and
 privileges. Missing credentials when no ADMIN exists, or a configured username
 already held by a regular user, cause a clear error.
@@ -32,18 +32,24 @@ tokens return HTTP 401. Role changes take effect on existing access tokens.
 The account holder or ADMIN may `GET` or `PATCH /api/users/{id}/`. PATCH accepts
 only `username` and `email`, for example `{"email":"new@example.com"}`.
 ADMIN may `GET /api/users/` and `PATCH /api/users/{id}/role/` with
-`{"role":"PLANNER"}` or `{"role":"VIEWER"}`. Only ADMIN may
+`{"role":"PLANNER"}`, `{"role":"TEACHER"}`, or `{"role":"VIEWER"}`.
+Promote an existing VIEWER with `{"role":"TEACHER"}`. An unassigned TEACHER
+may be demoted with `{"role":"VIEWER"}`. Switching directly between TEACHER
+and PLANNER returns HTTP 409; transition through VIEWER. Removing TEACHER from
+an assigned user returns HTTP 409 with
+`{"detail":"Reassign or delete this teacher's lessons before removing TEACHER."}`.
+The same guard applies to Django Admin group editing. Only ADMIN may
 `DELETE /api/users/{id}/`, and only when the target is currently VIEWER. A
-PLANNER must be demoted first. Deleting PLANNER or ADMIN returns HTTP 409;
+PLANNER or TEACHER must be demoted first. Deleting PLANNER, TEACHER, or ADMIN returns HTTP 409;
 other users receive HTTP 403. Deleted accounts lose access immediately.
 
 ## Scheduling access
 
-Authenticated VIEWER, PLANNER, and ADMIN accounts can read scheduling data.
-Only PLANNER and ADMIN can create, update, or delete it; VIEWER writes return
+Authenticated VIEWER, TEACHER, PLANNER, and ADMIN accounts can read scheduling data.
+Only PLANNER and ADMIN can create, update, or delete it; VIEWER and TEACHER writes return
 HTTP 403. Timetables are shared, so any PLANNER or ADMIN may edit them.
 
-All API paths end in `/` and exchange JSON. Each collection supports `GET` (200,
+All API paths end in `/` and exchange JSON. Except for the teacher directory, each collection supports `GET` (200,
 JSON array) and `POST` (201, created record). Each detail path appends an integer
 `id` and supports `GET`, `PUT`, and `PATCH` (200, JSON record), plus `DELETE`
 (204, empty body). The `id` field in every response is read-only.
@@ -53,9 +59,15 @@ JSON array) and `POST` (201, created record). Each detail path appends an intege
 | `/api/timetables/` | `name`, optional `description` |
 | `/api/student-groups/` | `name`, `size` (positive integer) |
 | `/api/subjects/` | `name`, optional `description` |
-| `/api/teachers/` | `first_name`, `last_name`, optional `academic_title`, optional `email` |
+| `/api/teachers/` | Read-only TEACHER user directory; no writable fields |
 | `/api/rooms/` | `name`, `capacity` (positive integer) |
-| `/api/lessons/` | `timetable`, `student_group`, `subject`, `teacher`, `room` (existing record IDs); `weekday` (`MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, or `SUN`); `start_time`, `end_time` (for example, `09:00:00`) |
+| `/api/lessons/` | `timetable`, `student_group`, `subject`, `room` (existing record IDs), `teacher` (TEACHER user ID); `weekday` (`MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, or `SUN`); `start_time`, `end_time` (for example, `09:00:00`) |
+
+`GET /api/teachers/` returns users such as
+`[{"id":7,"username":"alice","email":"alice@example.com","role":"TEACHER"}]`.
+`GET /api/teachers/7/` returns the same object. Other roles are omitted and
+return HTTP 404 at the detail path. Teacher POST, PUT, PATCH, and DELETE return
+HTTP 405. Assign roles through the user role endpoint.
 
 For example, create a timetable with
 `POST /api/timetables/` and `{"name":"Autumn"}`. Create a lesson
@@ -66,7 +78,7 @@ with `POST /api/lessons/` and a body such as:
   "timetable": 1,
   "student_group": 1,
   "subject": 1,
-  "teacher": 1,
+  "teacher": 7,
   "room": 1,
   "weekday": "MON",
   "start_time": "09:00:00",
@@ -74,7 +86,9 @@ with `POST /api/lessons/` and a body such as:
 }
 ```
 
-Relations are returned as IDs. A missing or nonexistent related ID returns
+Relations, including `teacher`, are returned as IDs. A missing, nonexistent, or
+non-TEACHER user ID in `teacher` returns HTTP 400 with a `teacher` field error.
+Other missing or nonexistent related IDs return
 HTTP 400 with errors keyed by field, such as `{"room":["Invalid pk ..."]}`.
 Invalid lesson intervals return an `end_time` error; overlapping room, teacher,
 or student group bookings return an error keyed by the conflicting resource.
@@ -83,7 +97,7 @@ HTTP 400 with `non_field_errors`.
 
 Missing records and unknown `/api/` paths return HTTP 404 with a JSON `detail`
 message. Unsupported methods return HTTP 405 with the method named in `detail`.
-Deleting a student group, subject, teacher, or room used by a lesson returns
+Deleting a student group, subject, or room used by a lesson returns
 HTTP 409 with a `detail` message explaining that related lessons prevent
 deletion. Deleting a timetable removes its lessons as well.
 
@@ -95,3 +109,15 @@ sending or expecting `owner`; POST, PUT, and PATCH with that field return HTTP
 are discarded. Back up the SQLite database before migrating if those IDs are
 needed for historical records. Existing clients must obtain a JWT before using
 scheduling or user routes.
+
+### Teacher replacement migration
+
+Migration 0003 **discards every row in `timetables_teacher` and
+`timetables_lesson`** and recreates the lesson table with `teacher_id` pointing
+to the configured User table. User accounts, timetables, student groups,
+subjects, and rooms are unaffected. Back up the SQLite database before
+running `python manage.py migrate` if old teacher or lesson data might be
+needed. Run `python manage.py bootstrap_accounts` afterward to create the
+TEACHER group. To roll back, restore the database backup together with the
+pre-migration application code; reversing the migration cannot recover the
+discarded rows. Existing clients must use TEACHER user IDs in lesson payloads.

@@ -6,6 +6,8 @@ def user_role(user):
         return 'ADMIN'
     if user.groups.filter(name='PLANNER').exists():
         return 'PLANNER'
+    if user.groups.filter(name='TEACHER').exists():
+        return 'TEACHER'
     return 'VIEWER'
 
 
