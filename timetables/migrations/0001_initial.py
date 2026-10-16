@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
             name='Room',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100)),
+                ('name', models.CharField(max_length=50)),
                 ('capacity', models.PositiveIntegerField(validators=[django.core.validators.MinValueValidator(1)])),
             ],
             options={
@@ -32,7 +32,7 @@ class Migration(migrations.Migration):
             name='StudentGroup',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=200)),
+                ('name', models.CharField(max_length=50)),
                 ('size', models.PositiveIntegerField(validators=[django.core.validators.MinValueValidator(1)])),
             ],
             options={
@@ -45,7 +45,7 @@ class Migration(migrations.Migration):
             name='Subject',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=200)),
+                ('name', models.CharField(max_length=100)),
                 ('description', models.TextField(blank=True, default='')),
             ],
             options={
@@ -58,9 +58,9 @@ class Migration(migrations.Migration):
             name='Teacher',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('first_name', models.CharField(max_length=100)),
-                ('last_name', models.CharField(max_length=100)),
-                ('academic_title', models.CharField(blank=True, default='', max_length=100)),
+                ('first_name', models.CharField(max_length=50)),
+                ('last_name', models.CharField(max_length=50)),
+                ('academic_title', models.CharField(blank=True, default='', max_length=10)),
                 ('email', models.EmailField(blank=True, default='', max_length=254)),
             ],
             options={
@@ -73,7 +73,7 @@ class Migration(migrations.Migration):
             name='Timetable',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=200)),
+                ('name', models.CharField(max_length=50)),
                 ('description', models.TextField(blank=True, default='')),
                 ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='timetables', to=settings.AUTH_USER_MODEL)),
             ],
