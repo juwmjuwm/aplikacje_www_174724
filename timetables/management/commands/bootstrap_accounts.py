@@ -3,7 +3,10 @@ import os
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management.base import BaseCommand, CommandError
+from django.core.exceptions import ValidationError
 from django.db import transaction
+
+from accounts.usernames import validate_username
 
 
 class Command(BaseCommand):
@@ -13,6 +16,11 @@ class Command(BaseCommand):
         username = os.getenv('INITIAL_ADMIN_USERNAME', '').strip()
         password = os.getenv('INITIAL_ADMIN_PASSWORD', '')
         User = get_user_model()
+        if username:
+            try:
+                username = validate_username(username)
+            except ValidationError as exc:
+                raise CommandError(f'Invalid INITIAL_ADMIN_USERNAME: {exc}') from exc
 
         with transaction.atomic():
             Group.objects.get_or_create(name='PLANNER')

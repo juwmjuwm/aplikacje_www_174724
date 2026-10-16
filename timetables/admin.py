@@ -6,6 +6,8 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from accounts.usernames import validate_username
+
 from .models import Lesson, Room, StudentGroup, Subject, Timetable, lock_teacher_assignment
 from .permissions import user_roles
 
@@ -13,13 +15,27 @@ from .permissions import user_roles
 User = get_user_model()
 
 
-class SafeUserCreationForm(AdminUserCreationForm):
+class CanonicalUsernameFormMixin:
+    def clean_username(self):
+        try:
+            username = validate_username(self.cleaned_data['username'])
+        except ValidationError as exc:
+            raise ValidationError(exc.messages) from exc
+        matches = User.objects.filter(username=username)
+        if self.instance.pk:
+            matches = matches.exclude(pk=self.instance.pk)
+        if matches.exists():
+            raise ValidationError('A user with that username already exists.')
+        return username
+
+
+class SafeUserCreationForm(CanonicalUsernameFormMixin, AdminUserCreationForm):
     class Meta(AdminUserCreationForm.Meta):
         model = User
         fields = ('username',)
 
 
-class SafeUserChangeForm(UserChangeForm):
+class SafeUserChangeForm(CanonicalUsernameFormMixin, UserChangeForm):
     class Meta(UserChangeForm.Meta):
         model = User
         fields = '__all__'

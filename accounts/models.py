@@ -1,6 +1,8 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager, Group, Permission
 from django.db import models
 
+from .usernames import validate_username
+
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -8,7 +10,7 @@ class UserManager(BaseUserManager):
     def create_user(self, username, password=None, **extra_fields):
         if not username:
             raise ValueError('Username is required.')
-        user = self.model(username=self.model.normalize_username(username), **extra_fields)
+        user = self.model(username=validate_username(username), **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -34,6 +36,10 @@ class User(AbstractUser):
     )
 
     objects = UserManager()
+
+    def save(self, *args, **kwargs):
+        self.username = validate_username(self.username)
+        return super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'auth_user'

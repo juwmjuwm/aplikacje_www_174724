@@ -14,26 +14,38 @@ start. It creates the `PLANNER` and `TEACHER` groups and, if none exists, an ADM
 from the initial credentials. Repeated runs preserve its password and
 privileges. Missing credentials when no ADMIN exists, or a configured username
 already held by a regular user, cause a clear error.
+`INITIAL_ADMIN_USERNAME` is canonicalized with Unicode NFKC and case folding:
+`ADMIN` creates or finds `admin`. Repeated bootstrap runs preserve an existing
+ADMIN's password and privileges, even when the configured casing changes.
 
 ## Authentication and users
 
 Register a VIEWER with `POST /api/register/` and
-`{"username":"alice","password":"Strong-unique-pass-123","first_name":"Alice","last_name":"Nowak"}`.
+`{"username":"Alice","password":"Strong-unique-pass-123","first_name":"Alice","last_name":"Nowak"}`.
 Both names are required and must contain non-whitespace characters; they are
 trimmed before storage. Registration validates passwords and rejects email and
 privilege fields. A response is
 `{"id":7,"username":"alice","first_name":"Alice","last_name":"Nowak","role":"VIEWER","roles":["VIEWER"]}`.
 Account responses omit email and passwords.
+Usernames are normalized with Unicode NFKC and case folding before storage;
+the lowercase value in the response is authoritative. Registering `ALICE`
+after `alice` exists returns HTTP 400 with a `username` error and creates no
+account.
 
 Obtain tokens with `POST /api/token/` and
-`{"username":"alice","password":"Strong-unique-pass-123"}`. Refresh access
+`{"username":"ALICE","password":"Strong-unique-pass-123"}`. Username input
+is matched without regard to case in token and Django Admin login. Invalid or
+inactive credentials are still denied. Refresh access
 with `POST /api/token/refresh/` and `{"refresh":"<refresh token>"}`. Send
 `Authorization: Bearer <access token>` on protected requests. Missing or invalid
 tokens return HTTP 401. Role changes take effect on existing access tokens.
 
 The account holder or ADMIN may `GET` or `PATCH /api/users/{id}/`. PATCH accepts
 `username`, `first_name`, and `last_name`, for example
-`{"first_name":"Alicja"}`. Submitted names are trimmed and cannot be blank;
+`{"username":"ALICE","first_name":"Alicja"}`. This succeeds for `alice`
+and returns `"username":"alice"`; a different account's canonical username
+returns HTTP 400 with a `username` error and leaves the profile unchanged.
+Submitted names are trimmed and cannot be blank;
 omitted fields stay unchanged. Email, password, and privilege fields return
 HTTP 400. The response includes both names, `role`, and `roles`, and omits
 email and passwords. Existing accounts with empty names remain readable.
@@ -195,3 +207,20 @@ account IDs, password hashes, roles, permissions, and lesson references remain;
 stored email values are discarded. To roll back, restore the backup together
 with the previous application code. Reversing the email removal migration is
 unsupported.
+
+### Canonical username migration
+
+Before deploying the username change, stop account writers and back up the
+database. Inspect existing usernames using Django's NFKC normalization followed
+by Unicode `casefold()`. Accounts that produce the same canonical name, or a
+canonical name that fails the username syntax or 150-character limit, must be
+renamed to distinct valid names. Run `python manage.py migrate`. Migration
+`accounts.0003_canonical_usernames` preflights every account before changing
+any row. If it finds a problem, it stops with `Cannot canonicalize usernames`
+and reports each affected account ID and current username. Correct those rows
+manually and rerun `python manage.py migrate`; the failed attempt changes no
+usernames. Successful migration preserves account IDs, password hashes,
+privileges, group memberships, and lesson references. Returned account and
+teacher usernames use the canonical lowercase form. Future bulk imports that
+bypass model saves must apply the same normalization and validation before
+writing usernames. Restoring the old casing requires the database backup.
