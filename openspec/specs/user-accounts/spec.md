@@ -184,18 +184,22 @@ At `DELETE /api/users/{id}/`, an authenticated user SHALL be able to delete thei
 - **THEN** the API returns HTTP 409 and leaves the ADMIN account unchanged
 
 ### Requirement: Teacher role assignment
-The system SHALL let ADMIN assign TEACHER to an existing VIEWER through `PATCH /api/users/{id}/role/` with `{"role":"TEACHER"}`. TEACHER SHALL be distinct from PLANNER and ADMIN. Only ADMIN SHALL change roles; registration and profile updates SHALL NOT grant TEACHER.
+The system SHALL let ADMIN assign TEACHER to a regular user through `PATCH /api/users/{id}/role/` with `{"roles":["TEACHER"]}` or `{"roles":["PLANNER","TEACHER"]}`. Only ADMIN SHALL change roles; registration and profile updates SHALL NOT grant TEACHER.
 
 #### Scenario: Promote a viewer to teacher
-- **WHEN** ADMIN sets an existing VIEWER's role to TEACHER
-- **THEN** the role endpoint returns the account with role TEACHER and subsequent requests using an existing token use that role
+- **WHEN** ADMIN sends `{"roles":["TEACHER"]}` for an existing VIEWER
+- **THEN** the role endpoint returns `roles` containing TEACHER and subsequent requests using an existing token use that membership
 
 #### Scenario: Unauthorized teacher promotion
 - **WHEN** a non-ADMIN user attempts to assign TEACHER or submits a role through registration or profile update
 - **THEN** the request is rejected without changing role membership
 
 #### Scenario: Assign teacher to another role
-- **WHEN** ADMIN attempts to set an ADMIN or PLANNER account directly to TEACHER
+- **WHEN** ADMIN sends `{"roles":["PLANNER","TEACHER"]}` for an existing PLANNER
+- **THEN** the user holds both memberships
+
+#### Scenario: Reject administrator target
+- **WHEN** ADMIN attempts to change an ADMIN account's roles
 - **THEN** the role endpoint rejects the change without changing the account
 
 ### Requirement: Teacher role removal
@@ -235,27 +239,20 @@ An ADMIN SHALL be able to set a regular user's complete PLANNER and TEACHER memb
 - **WHEN** a non-ADMIN submits a role change, an ADMIN is targeted, or `roles` contains VIEWER, ADMIN, duplicates, or unknown values
 - **THEN** the request is rejected without changing memberships
 
-### Requirement: Compatible single-role updates
-The role endpoint SHALL continue to accept `{"role":"VIEWER"}`, `{"role":"PLANNER"}`, and `{"role":"TEACHER"}` as complete single-role assignments with its existing direct-switch restriction. A request SHALL contain exactly one of `role` or `roles`; supplying both SHALL return HTTP 400 without changing memberships.
-
-#### Scenario: Existing client assigns one role
-- **WHEN** ADMIN sends a valid single `role` request for a regular user
-- **THEN** the endpoint applies the existing single-role transition behavior and returns the updated account
-
-#### Scenario: Ambiguous role payload
-- **WHEN** ADMIN sends both `role` and `roles` in one request
-- **THEN** the endpoint returns HTTP 400 and leaves memberships unchanged
-
 ### Requirement: Complete account role representation
-Account and teacher responses SHALL include an authoritative `roles` array and retain the existing `role` field. `roles` SHALL list PLANNER and TEACHER memberships; it SHALL contain VIEWER only when neither is held by a regular user. An ADMIN response SHALL include ADMIN and any held group memberships. The legacy `role` field SHALL retain its precedence of ADMIN, PLANNER, TEACHER, then VIEWER.
+Account and teacher responses SHALL contain `roles` and SHALL omit `role`. The array SHALL list PLANNER and TEACHER memberships, contain VIEWER only when a regular user holds neither, and include ADMIN plus any group memberships for an administrator.
 
 #### Scenario: Read a combined-role account
 - **WHEN** a permitted caller retrieves an account with PLANNER and TEACHER memberships
-- **THEN** the response includes both values in `roles` and `role` is PLANNER
+- **THEN** the response contains `roles: ["PLANNER", "TEACHER"]` and no `role` field
 
 #### Scenario: Read an admin teacher
 - **WHEN** a permitted caller retrieves an ADMIN who also holds TEACHER membership
-- **THEN** the response includes ADMIN and TEACHER in `roles` and `role` is ADMIN
+- **THEN** the response contains ADMIN and TEACHER in `roles` and no `role` field
+
+#### Scenario: Read a viewer
+- **WHEN** a permitted caller retrieves a regular account without PLANNER or TEACHER membership
+- **THEN** the response contains `roles: ["VIEWER"]` and no `role` field
 
 ### Requirement: Safe teacher removal and account deletion
 Removing TEACHER membership from a user assigned to any lesson SHALL return HTTP 409 and preserve all memberships and lessons, including when the user retains PLANNER. The same guard SHALL apply to Django Admin group editing. Account deletion through the API SHALL follow the restricted account deletion and teacher account deletion requirements. Account deletion through Django Admin SHALL remain limited to regular users with neither PLANNER nor TEACHER membership.
@@ -288,11 +285,11 @@ The active user account model and its database table SHALL have no email field o
 - **THEN** it creates a usable account table without an email column
 
 ### Requirement: Email-free registration and account responses
-`POST /api/register/` SHALL require username, password, `first_name`, and `last_name` to create a VIEWER account subject to the existing password policy. Both names SHALL be nonblank after trimming whitespace. Registration, account list and detail, profile update, and role update responses SHALL include `id`, `username`, `first_name`, `last_name`, `role`, and `roles` while omitting email and password. Submitted email SHALL receive HTTP 400.
+`POST /api/register/` SHALL require username, password, `first_name`, and `last_name` to create a VIEWER account subject to the existing password policy. Both names SHALL be nonblank after trimming whitespace. Registration, account list and detail, profile update, and role update responses SHALL include `id`, `username`, `first_name`, `last_name`, and `roles` while omitting `role`, email, and password. Submitted email SHALL receive HTTP 400.
 
 #### Scenario: Register with username and password
 - **WHEN** a client submits a unique username, valid password, and nonblank first and last names without email
-- **THEN** the API returns HTTP 201 with `id`, `username`, `first_name`, `last_name`, `role`, and `roles` and no email or password
+- **THEN** the API returns HTTP 201 with `id`, `username`, `first_name`, `last_name`, and `roles: ["VIEWER"]`, and without `role`, email, or password
 
 #### Scenario: Reject missing or blank name
 - **WHEN** a registration request omits either name or supplies a name consisting only of whitespace
@@ -343,3 +340,22 @@ An authenticated account holder SHALL be able to `POST /api/users/me/password/` 
 #### Scenario: Require authentication
 - **WHEN** a caller without valid authentication requests password change
 - **THEN** the API returns HTTP 401 and changes no password
+
+### Requirement: Roles-only role updates
+`PATCH /api/users/{id}/role/` SHALL require exactly one `roles` array. It SHALL reject requests containing the legacy `role` field or omitting `roles` with HTTP 400 without changing memberships. An empty array SHALL continue to set a regular account to VIEWER.
+
+#### Scenario: Reject a legacy role request
+- **WHEN** ADMIN sends `{"role":"PLANNER"}` for a regular user
+- **THEN** the endpoint returns HTTP 400 and leaves memberships unchanged
+
+#### Scenario: Reject both role fields
+- **WHEN** ADMIN sends both `role` and `roles`
+- **THEN** the endpoint returns HTTP 400 and leaves memberships unchanged
+
+#### Scenario: Reject missing roles
+- **WHEN** ADMIN sends a role update without `roles`
+- **THEN** the endpoint returns HTTP 400 and leaves memberships unchanged
+
+#### Scenario: Assign viewer with an empty array
+- **WHEN** ADMIN sends `{"roles":[]}` for a regular user without assigned lessons
+- **THEN** the request succeeds and subsequent account responses contain `roles: ["VIEWER"]`

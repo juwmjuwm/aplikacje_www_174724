@@ -1,5 +1,7 @@
 """REST API contract tests for accounts and JWT authentication."""
 
+import json
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
@@ -25,7 +27,7 @@ class AccountAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data, {
             "id": response.data["id"], "username": "alice", "first_name": "Alice", "last_name": "Nowak",
-            "role": "VIEWER", "roles": ["VIEWER"],
+            "roles": ["VIEWER"],
         })
         self.assertTrue(get_user_model().objects.get(pk=response.data["id"]).check_password(PASSWORD))
 
@@ -101,7 +103,7 @@ class AccountAPITests(APITestCase):
 
         # Then
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {"id": user.pk, "username": "alice", "first_name": "Alicja", "last_name": "Nowak", "role": "VIEWER", "roles": ["VIEWER"]})
+        self.assertEqual(response.data, {"id": user.pk, "username": "alice", "first_name": "Alicja", "last_name": "Nowak", "roles": ["VIEWER"]})
 
     def test_given_other_account_when_patched_by_viewer_then_returns_forbidden(self):
         # Given
@@ -141,7 +143,7 @@ class AccountAPITests(APITestCase):
 
         # Then
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data, {"id": user.pk, "username": "alice", "first_name": "", "last_name": "", "role": "PLANNER", "roles": ["PLANNER", "TEACHER"]})
+        self.assertEqual(response.data, {"id": user.pk, "username": "alice", "first_name": "", "last_name": "", "roles": ["PLANNER", "TEACHER"]})
 
     def test_given_duplicate_roles_when_assigning_roles_then_returns_validation_error(self):
         # Given
@@ -155,6 +157,30 @@ class AccountAPITests(APITestCase):
         # Then
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data, {"roles": ["Duplicate roles are not allowed."]})
+
+    def test_given_legacy_or_missing_role_payload_when_assigning_roles_then_preserves_memberships(self):
+        admin = get_user_model().objects.create_superuser("admin", PASSWORD)
+        user = get_user_model().objects.create_user("alice", PASSWORD)
+        self.authenticate(admin)
+
+        for payload in ({"role": "PLANNER"}, {"role": "PLANNER", "roles": ["TEACHER"]}, {}):
+            with self.subTest(payload=payload):
+                response = self.client.patch(f"/api/users/{user.pk}/role/", payload, format="json")
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertFalse(user.groups.exists())
+
+    def test_given_role_patch_schema_when_read_then_requires_roles_only(self):
+        response = self.client.get("/api/schema/", HTTP_ACCEPT="application/json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        schema = json.loads(response.content)
+        self.assertNotIn("role", schema["components"]["schemas"]["User"]["properties"])
+        request_body = schema["paths"]["/api/users/{id}/role/"]["patch"]["requestBody"]
+        self.assertTrue(request_body["required"])
+        for content in request_body["content"].values():
+            request_schema = content["schema"]
+            self.assertEqual(request_schema["required"], ["roles"])
+            self.assertEqual(set(request_schema["properties"]), {"roles"})
 
     def test_given_correct_current_password_when_changing_password_then_returns_empty_body(self):
         # Given

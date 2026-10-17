@@ -148,7 +148,7 @@ class SchedulingAPITests(APITestCase):
         # Then
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {"count": 1, "next": None, "previous": None, "results": [
-            {"id": self.teacher.pk, "username": "teacher", "first_name": "Tina", "last_name": "Nowak", "role": "TEACHER", "roles": ["TEACHER"]},
+            {"id": self.teacher.pk, "username": "teacher", "first_name": "Tina", "last_name": "Nowak", "roles": ["TEACHER"]},
         ]})
 
     def test_given_teacher_directory_when_posted_to_then_returns_method_error(self):

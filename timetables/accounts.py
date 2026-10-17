@@ -10,9 +10,10 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.openapi import AutoSchema
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiResponse
 
-from .permissions import IsAdmin, IsSelfOrAdmin, user_role, user_roles
+from .permissions import IsAdmin, IsSelfOrAdmin, user_roles
 from .models import Lesson, lock_teacher_assignment
 from .pagination import CollectionPagination
 from accounts.usernames import validate_username
@@ -66,15 +67,11 @@ class NameFieldsMixin:
 
 
 class UserSerializer(serializers.ModelSerializer):
-    role = serializers.SerializerMethodField()
     roles = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'first_name', 'last_name', 'role', 'roles')
-
-    def get_role(self, obj) -> str:
-        return user_role(obj)
+        fields = ('id', 'username', 'first_name', 'last_name', 'roles')
 
     def get_roles(self, obj) -> list[str]:
         return user_roles(obj)
@@ -151,18 +148,35 @@ class PasswordChangeView(APIView):
 
 
 class RoleSerializer(StrictFieldsMixin, serializers.Serializer):
-    role = serializers.ChoiceField(choices=('VIEWER', 'PLANNER', 'TEACHER'), required=False)
     roles = serializers.ListField(
         child=serializers.ChoiceField(choices=('PLANNER', 'TEACHER')),
-        required=False, allow_empty=True,
+        allow_empty=True,
     )
 
     def validate(self, attrs):
-        if ('role' in attrs) == ('roles' in attrs):
-            raise serializers.ValidationError('Supply exactly one of role or roles.')
-        if 'roles' in attrs and len(attrs['roles']) != len(set(attrs['roles'])):
+        if len(attrs['roles']) != len(set(attrs['roles'])):
             raise serializers.ValidationError({'roles': ['Duplicate roles are not allowed.']})
         return attrs
+
+
+ROLE_REQUEST_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'roles': {
+            'type': 'array',
+            'items': {'type': 'string', 'enum': ['PLANNER', 'TEACHER']},
+        },
+    },
+    'required': ['roles'],
+    'additionalProperties': False,
+}
+
+
+class RequiredRoleSchema(AutoSchema):
+    def _get_request_body(self, direction='request'):
+        body = super()._get_request_body(direction)
+        body['required'] = True
+        return body
 
 
 @extend_schema_view(
@@ -228,7 +242,9 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         return Response(UserSerializer(user).data)
 
     @extend_schema(
-        request=RoleSerializer,
+        request={media_type: ROLE_REQUEST_SCHEMA for media_type in (
+            'application/json', 'application/x-www-form-urlencoded', 'multipart/form-data',
+        )},
         responses={
             200: UserSerializer,
             400: OpenApiResponse(description='Invalid role selection.'),
@@ -237,7 +253,7 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             409: OpenApiResponse(description='Role transition conflicts with account or lesson assignments.'),
         },
     )
-    @action(detail=True, methods=['patch'])
+    @action(detail=True, methods=['patch'], schema=RequiredRoleSchema())
     def role(self, request, pk=None):
         self.get_object()
         serializer = RoleSerializer(data=request.data)
@@ -248,12 +264,7 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             if user.is_superuser:
                 return Response({'detail': 'ADMIN role cannot be changed.'}, status=status.HTTP_409_CONFLICT)
             current_roles = set(user_roles(user))
-            legacy = 'role' in serializer.validated_data
-            target_roles = ({serializer.validated_data['role']}
-                            if legacy else set(serializer.validated_data['roles']))
-            target_roles.discard('VIEWER')
-            if legacy and {user_role(user), serializer.validated_data['role']} == {'TEACHER', 'PLANNER'}:
-                return Response({'detail': 'Switch between TEACHER and PLANNER through VIEWER.'}, status=status.HTTP_409_CONFLICT)
+            target_roles = set(serializer.validated_data['roles'])
             if 'TEACHER' in current_roles and 'TEACHER' not in target_roles and Lesson.objects.filter(teacher=user).exists():
                 return Response({'detail': 'Reassign or delete this teacher\'s lessons before removing TEACHER.'}, status=status.HTTP_409_CONFLICT)
             planner, _ = Group.objects.get_or_create(name='PLANNER')

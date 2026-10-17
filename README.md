@@ -2,13 +2,12 @@
 
 API JSON do tygodniowych planów zajęć, lekcji, sal, przedmiotów, grup uczniów i kont nauczycieli. Wykorzystuje Django, SQLite i tokeny JWT. Nie ma osobnego interfejsu użytkownika; korzystaj z interaktywnej strony API lub klienta HTTP.
 
-## Uruchomienie lokalne
+## Uruchomienie lokalnego serwera
 
 ### Wymagania wstępne
 
-- Python **3.12 lub nowszy** oraz pip. Sprawdź wersję poleceniem `python --version` (lub `py --version` w systemie Windows).
-- Terminal otwarty w katalogu tego projektu. Git jest potrzebny tylko wtedy, gdy klonujesz projekt.
-- Nie jest potrzebny osobny serwer bazy danych: Django tworzy lokalną bazę SQLite podczas migracji.
+- Python **3.12 lub nowszy** oraz pip. Sprawdź wersję poleceniem `python --version`.
+- Nie jest potrzebna zewnętrzna bazy danych: Django tworzy lokalną bazę SQLite podczas migracji.
 
 Aby utworzyć nową bazę danych, uruchom te polecenia w PowerShellu w systemie Windows:
 
@@ -38,9 +37,9 @@ INITIAL_ADMIN_USERNAME=admin
 INITIAL_ADMIN_PASSWORD=replace-with-your-own-strong-password
 ```
 
-`DJANGO_SECRET_KEY` jest wymagany do uruchomienia Django i podpisywania tokenów JWT. Początkowe dane logowania administratora są potrzebne przy tworzeniu pierwszego administratora. Użyj unikalnego hasła mającego co najmniej osiem znaków, w tym małe i wielkie litery, cyfrę oraz znak interpunkcyjny lub symbol; Django odrzuca także hasła popularne lub łatwe do odgadnięcia. Plik `.env` jest ignorowany przez Git. Istniejące systemowe zmienne środowiskowe mają pierwszeństwo przed wartościami z pliku. Domyślną lokalizacją bazy SQLite jest `db.sqlite3` w tym katalogu; jeśli potrzebujesz innej ścieżki, ustaw `DJANGO_DB_PATH`.
+`DJANGO_SECRET_KEY` jest wymagany do uruchomienia Django i podpisywania tokenów JWT. Początkowe dane logowania administratora są potrzebne przy tworzeniu pierwszego administratora. Użyj unikalnego hasła mającego co najmniej osiem znaków, w tym małe i wielkie litery, cyfrę oraz znak interpunkcyjny lub symbol; Django odrzuca także hasła popularne lub łatwe do odgadnięcia.
 
-Utwórz tabele, początkowe role i konto, a następnie uruchom serwer:
+Utwórz tabele, początkowe role i konto, a następnie uruchom serwer za pomocą komend:
 
 ```sh
 python manage.py migrate
@@ -48,11 +47,17 @@ python manage.py bootstrap_accounts
 python manage.py runserver
 ```
 
-Pozostaw terminal otwarty. Otwórz `http://127.0.0.1:8000/api/docs/`, aby skorzystać z interaktywnego API, `http://127.0.0.1:8000/api/schema/`, aby zobaczyć schemat OpenAPI, lub `http://127.0.0.1:8000/admin/`, aby skorzystać z panelu administracyjnego Django. Zatrzymaj serwer klawiszami Ctrl+C. Uruchom `migrate` po pobraniu zmian dodających migracje, a `bootstrap_accounts` po migracjach przy każdym uruchomieniu wdrożenia. Polecenie `bootstrap_accounts` tworzy grupy `PLANNER` i `TEACHER` oraz tworzy administratora tylko wtedy, gdy żaden nie istnieje; ponowne uruchomienie nie resetuje hasła istniejącego administratora. Ta konfiguracja ma `DEBUG=True` i jest przeznaczona do pracy lokalnej.
+Polecenie `bootstrap_accounts` tworzy grupy (role) `PLANNER` i `TEACHER` oraz tworzy administratora tylko wtedy, gdy jeszcze żaden nie istnieje; ponowne uruchomienie nie resetuje hasła istniejącego administratora.
 
-## Pierwsze żądanie do API
+Serwer został uruchomiony. Otwórz:
+- `http://127.0.0.1:8000/api/docs/` - aby skorzystać z interaktywnego API Swagger UI
+- `http://127.0.0.1:8000/api/schema/` - aby zobaczyć schemat OpenAPI
+- `http://127.0.0.1:8000/admin/` - aby skorzystać z panelu administracyjnego Django.
 
-Wszystkie poniższe ścieżki API zaczynają się od `http://127.0.0.1:8000`, kończą się znakiem `/` i korzystają z formatu JSON. W interfejsie Swagger UI (`/api/docs/`):
+
+## Rejestracja i pobranie tokenów dostępu
+
+W interfejsie Swagger UI (`/api/docs/`):
 
 1. Otwórz `POST /api/register/`, kliknij **Try it out** i wyślij poniższy przykład, aby utworzyć konto `VIEWER`. Możesz też zalogować się danymi administratora z pliku `.env`.
 2. Otwórz `POST /api/token/` i wyślij nazwę użytkownika oraz hasło. Skopiuj wartość `access` z odpowiedzi.
@@ -62,16 +67,16 @@ Wszystkie poniższe ścieżki API zaczynają się od `http://127.0.0.1:8000`, ko
 Treść żądania rejestracji:
 
 ```json
-{"username":"Alice","password":"Strong-unique-pass-123!","first_name":"Alice","last_name":"Nowak"}
+{"username":"john","password":"Strong-unique-pass-123!","first_name":"John","last_name":"Doe"}
 ```
 
 Treść żądania pobrania tokenu dla `POST /api/token/`:
 
 ```json
-{"username":"alice","password":"Strong-unique-pass-123!"}
+{"username":"john","password":"Strong-unique-pass-123!"}
 ```
 
-Odpowiedź z tokenami zawiera `access` i `refresh`. Tokeny dostępu tracą ważność; wyślij `{"refresh":"<refresh token>"}` do `POST /api/token/refresh/`, aby otrzymać nowy token dostępu. Klient HTTP może wysłać:
+Odpowiedź z tokenami zawiera `access` i `refresh`. Access token traci ważność po 10 minutach, a refresh token po 1 tygodniu; wyślij `{"refresh":"<refresh token>"}` do `POST /api/token/refresh/`, aby otrzymać nowy token dostępu. Klient HTTP może wysłać:
 
 ```http
 GET /api/rooms/ HTTP/1.1
@@ -84,7 +89,7 @@ Authorization: Bearer <access token>
 | Rola lub przynależność do grupy | Dostępne działania |
 | --- | --- |
 | `VIEWER` | Odczyt danych planowania zajęć i zarządzanie własnym profilem. Jest to domyślna rola po rejestracji. |
-| `TEACHER` | Taki sam dostęp do odczytu; użytkownika można przypisywać do lekcji. |
+| `TEACHER` | Uprawnienia roli VIEWER + możliwość przypisywania użytkownika do lekcji + użytkownik wyświetla się po wylistowaniu wszystkich nauczycieli. |
 | `PLANNER` | Odczyt oraz tworzenie, aktualizowanie i usuwanie danych planowania zajęć. |
 | `ADMIN` | Wszystkie działania dotyczące planowania zajęć, wyświetlanie listy użytkowników i zmiana ról; dostęp do panelu administracyjnego Django. |
 
@@ -102,7 +107,7 @@ Konto może jednocześnie należeć do grup `PLANNER` i `TEACHER`. Administrator
 | `PATCH /api/users/{id}/role/` | Administrator | Zastąpienie przynależności do grup; na przykład `{"roles":["PLANNER","TEACHER"]}`. |
 | `DELETE /api/users/{id}/` | Dany użytkownik lub administrator | Usunięcie konta; zwraca 204. |
 
-Żądanie zmiany ról musi zawierać dokładnie jedno z pól: `roles` albo starsze `role`. `{"roles":[]}` ustawia rolę `VIEWER`; `{"roles":["TEACHER"]}` i `{"roles":["PLANNER"]}` przyznają przynależność do jednej grupy. Starsza postać przyjmuje `{"role":"VIEWER"}`, `{"role":"TEACHER"}` lub `{"role":"PLANNER"}`. Odpowiedzi zawierają `role` (rolę główną) i `roles` (wszystkie role); konto z połączonymi rolami ma `"role":"PLANNER"` i `"roles":["PLANNER","TEACHER"]`. Nie można przypisać ani usunąć roli `ADMIN` przez ten punkt końcowy ani usunąć roli `TEACHER` użytkownikowi z przypisanymi lekcjami. Najpierw przypisz te lekcje komuś innemu lub je usuń. Usunięcie administratora lub nauczyciela z przypisanymi lekcjami również zwraca 409. Bezpośrednia zmiana roli nauczyciela na planistę lub odwrotnie za pomocą starszego, pojedynczego pola `role` zwraca 409; użyj `roles`, aby ustawić zamierzone przynależności do grup.
+Żądanie zmiany ról musi zawierać pole `roles` z tablicą przynależności do grup. `{"roles":[]}` ustawia rolę `VIEWER`, a odpowiedź zawiera `"roles":["VIEWER"]`. `{"roles":["TEACHER"]}` i `{"roles":["PLANNER"]}` przyznają przynależność do jednej grupy; `{"roles":["PLANNER","TEACHER"]}` przyznaje obie. Odpowiedzi użytkowników i nauczycieli zawierają tylko pole `roles` opisujące role; starsze pole `role` w żądaniu jest odrzucane z kodem 400. Nie można przypisać ani usunąć roli `ADMIN` przez ten punkt końcowy ani usunąć roli `TEACHER` użytkownikowi z przypisanymi lekcjami. Najpierw przypisz te lekcje komuś innemu lub je usuń. Usunięcie administratora lub nauczyciela z przypisanymi lekcjami również zwraca 409.
 
 Nazwy użytkowników zawierają tylko litery, cyfry dziesiętne i znaki podkreślenia (maksymalnie 150 znaków). Są normalizowane i porównywane bez rozróżniania wielkości liter, więc `Alice` i `alice` odnoszą się do tego samego konta. Imię i nazwisko są wymagane przy rejestracji, zawierają wyłącznie litery i są zapisywane z wielką pierwszą literą. Nowe hasła muszą spełniać wymagania z sekcji dotyczącej konfiguracji. Żądania dotyczące kont nie przyjmują adresu e-mail; odpowiedzi nie zawierają adresu e-mail ani haseł. Edycja profilu nie pozwala zmieniać haseł ani ról.
 
@@ -145,9 +150,3 @@ Odpowiedzi dla wszystkich kolekcji, w tym lista użytkowników dostępna adminis
 ```
 
 Odczytuj rekordy z pola `results`. Domyślnie strony zawierają 10 rekordów. Użyj `?page=2&size=5`; `size` musi być dodatnie i nie może przekraczać 100. Użyj `search` do wyszukiwania częściowych dopasowań bez rozróżniania wielkości liter: w nazwach planów zajęć, grup uczniów i sal; w nazwie lub opisie przedmiotu; oraz w imionach lub nazwiskach nauczycieli. Na przykład `GET /api/subjects/?search=biology&size=5`. Lekcje i użytkownicy nie mają filtra wyszukiwania.
-
-Typowe odpowiedzi to 200 przy odczycie i aktualizacji, 201 przy tworzeniu oraz 204 bez treści przy usuwaniu lub pomyślnej zmianie hasła. Nieprawidłowe pola, ID, godziny i konflikty rezerwacji zwracają 400 z błędami pól; brak uwierzytelnienia lub nieprawidłowe uwierzytelnienie zwraca 401; niewystarczające uprawnienia zwracają 403; brakujące rekordy zwracają 404; nieobsługiwane metody zwracają 405. Sali, przedmiotu ani grupy uczniów używanych przez lekcję nie można usunąć, dopóki powiązane lekcje nie zostaną przypisane inaczej lub usunięte (409). Usunięcie planu zajęć usuwa również jego lekcje.
-
-## Istniejące bazy danych
-
-Powyższe kroki konfiguracji dotyczą nowej bazy danych SQLite. Przed zastosowaniem migracji wykonaj kopię zapasową istniejącej bazy danych. Jeśli baza powstała przed wprowadzeniem niestandardowego modelu użytkownika i została już zmigrowana do `timetables.0003`, wstrzymaj zapisy i uruchom `python manage.py prepare_user_migration --backup path/to/backup.sqlite3` przed `migrate`. Pozwoli to zachować ID kont i powiązania lekcji przy usunięciu zapisanych adresów e-mail. Sama migracja `timetables.0003` zastępuje starą tabelę nauczycieli i **usuwa stare wiersze nauczycieli i lekcji**, dlatego zachowaj kopię zapasową, jeśli aktualizujesz projekt z wcześniejszej wersji. Późniejsze migracje kont mogą się zatrzymać, gdy istniejące nazwy użytkowników lub imiona i nazwiska naruszają obecne reguły; popraw wskazane rekordy i ponownie uruchom `migrate`. Po migracji uruchom `bootstrap_accounts`.

@@ -97,11 +97,11 @@ The API SHALL return a meaningful JSON error body for missing records or routes,
 - **THEN** the response is HTTP 409 with a JSON `detail` message explaining that related lessons prevent deletion
 
 ### Requirement: Teacher user directory
-Authenticated users SHALL be able to list TEACHER users at `GET /api/teachers/` and retrieve one at `GET /api/teachers/{id}/`. Responses SHALL contain `id`, `username`, `email`, and `role`, without secrets. Non-TEACHER users SHALL be excluded, and teacher creation, update, and deletion through this route SHALL be unsupported.
+Authenticated users SHALL be able to list TEACHER users at `GET /api/teachers/` and retrieve one at `GET /api/teachers/{id}/`. Responses SHALL contain `id`, `username`, and `roles` without `role` or secrets. Non-TEACHER users SHALL be excluded, and teacher creation, update, and deletion through this route SHALL be unsupported.
 
 #### Scenario: List available teachers
 - **WHEN** an authenticated user requests `GET /api/teachers/`
-- **THEN** the response contains only users with role TEACHER and their user IDs
+- **THEN** the response contains only users with TEACHER in `roles` and their user IDs, without a `role` field
 
 #### Scenario: Retrieve an ineligible user as teacher
 - **WHEN** an authenticated user requests `/api/teachers/{id}/` for a user who is not TEACHER
@@ -123,15 +123,15 @@ The lesson API SHALL accept and return the teacher's user ID in its `teacher` fi
 - **THEN** the API returns HTTP 400 with a `teacher` error and saves no invalid lesson
 
 ### Requirement: Complete teacher user directory
-Authenticated users SHALL be able to list and retrieve every user with TEACHER membership at `GET /api/teachers/` and `GET /api/teachers/{id}/`, regardless of PLANNER membership or ADMIN status. Users without TEACHER membership SHALL be absent and return HTTP 404 at the detail route. Responses SHALL contain `id`, `username`, `email`, `role`, and `roles`, without secrets; the route SHALL remain read-only.
+Authenticated users SHALL be able to list and retrieve every user with TEACHER membership at `GET /api/teachers/` and `GET /api/teachers/{id}/`, regardless of PLANNER membership or ADMIN status. Users without TEACHER membership SHALL be absent and return HTTP 404 at the detail route. Responses SHALL contain `id`, `username`, and `roles` without `role` or secrets; the route SHALL remain read-only.
 
 #### Scenario: List a planner teacher
 - **WHEN** an authenticated user lists teachers and a user holds both PLANNER and TEACHER memberships
-- **THEN** that user appears once with both memberships in `roles`
+- **THEN** that user appears once with both memberships in `roles` and no `role` field
 
 #### Scenario: Retrieve an admin teacher
 - **WHEN** an authenticated user retrieves an ADMIN who also holds TEACHER membership through the teacher route
-- **THEN** the endpoint returns that user with ADMIN and TEACHER in `roles`
+- **THEN** the endpoint returns that user with ADMIN and TEACHER in `roles` and no `role` field
 
 #### Scenario: Retrieve a non-teacher
 - **WHEN** an authenticated user requests a teacher detail for an account lacking TEACHER membership
@@ -149,12 +149,12 @@ The lesson API SHALL accept a user ID in `teacher` whenever that user holds TEAC
 - **THEN** the API returns HTTP 400 with a `teacher` error and saves no invalid lesson
 
 ### Requirement: Email-free teacher directory
-Authenticated callers SHALL be able to list and retrieve TEACHER members at `GET /api/teachers/` and `GET /api/teachers/{id}/`. Each teacher representation SHALL include `id`, `username`, `first_name`, `last_name`, `role`, and `roles` and SHALL omit email and passwords. Existing membership eligibility, ordering, and read-only behavior SHALL remain in effect.
+Authenticated callers SHALL be able to list and retrieve TEACHER members at `GET /api/teachers/` and `GET /api/teachers/{id}/`. Each teacher representation SHALL include `id`, `username`, `first_name`, `last_name`, and `roles` and SHALL omit `role`, email, and passwords. Existing membership eligibility, ordering, and read-only behavior SHALL remain in effect.
 
 #### Scenario: List a combined-role teacher
 - **WHEN** an authenticated caller lists teachers and an account holds PLANNER and TEACHER memberships
-- **THEN** the account appears once with both memberships, its first and last names, and no email field
+- **THEN** the account appears once with both memberships, its first and last names, and no `role` or email field
 
 #### Scenario: Retrieve an admin teacher
 - **WHEN** an authenticated caller retrieves an ADMIN who holds TEACHER membership
-- **THEN** the response includes ADMIN and TEACHER in `roles`, first and last names, and no email field
+- **THEN** the response includes ADMIN and TEACHER in `roles`, first and last names, and no `role` or email field

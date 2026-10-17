@@ -24,19 +24,21 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             Group.objects.get_or_create(name='PLANNER')
+            self.stdout.write('PLANNER group created.')
             Group.objects.get_or_create(name='TEACHER')
+            self.stdout.write('TEACHER group created.')
             if username:
                 existing = User.objects.select_for_update().filter(username=username).first()
                 if existing:
                     if not existing.is_superuser:
                         raise CommandError('Initial ADMIN username belongs to a regular user.')
-                    self.stdout.write('Initial ADMIN already exists; unchanged.')
+                    self.stdout.write('Initial ADMIN user already exists; skipped creation.')
                     return
             if User.objects.filter(is_superuser=True).exists():
-                self.stdout.write('An ADMIN already exists; unchanged.')
+                self.stdout.write('Another ADMIN user already exists; skipped creation.')
                 return
             if not username or not password:
-                raise CommandError('INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD are required when no ADMIN exists.')
+                raise CommandError('INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD are required in .env file when no ADMIN already exists.')
             try:
                 User.objects.create_superuser(username=username, password=password)
             except ValidationError as exc:
