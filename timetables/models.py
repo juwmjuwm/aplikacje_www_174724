@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import connection, models, transaction
+from django.db.models import Case, IntegerField, Value, When
 
 
 class Timetable(models.Model):
@@ -29,6 +30,17 @@ class StudentGroup(models.Model):
     def __str__(self):
         return self.name
 
+    def clean(self):
+        super().clean()
+        if self.pk and self.size is not None and self.lessons.filter(room__capacity__lt=self.size).exists():
+            raise ValidationError({"size": "Group size exceeds the capacity of an assigned room."})
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            lock_capacity_write(self._meta.db_table, self.pk)
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
 
 class Subject(models.Model):
     name = models.CharField(max_length=100)
@@ -54,6 +66,17 @@ class Room(models.Model):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        if self.pk and self.capacity is not None and self.lessons.filter(student_group__size__gt=self.capacity).exists():
+            raise ValidationError({"capacity": "Room capacity is smaller than an assigned group."})
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            lock_capacity_write(self._meta.db_table, self.pk)
+            self.full_clean()
+            return super().save(*args, **kwargs)
 
 
 class Lesson(models.Model):
@@ -86,6 +109,9 @@ class Lesson(models.Model):
     def clean(self):
         super().clean()
         errors = {}
+        if self.student_group_id is not None and self.room_id is not None:
+            if self.student_group.size > self.room.capacity:
+                errors["room"] = "Room capacity is smaller than the student group size."
         if self.teacher_id is not None:
             from .permissions import user_roles
             if 'TEACHER' not in user_roles(self.teacher):
@@ -115,8 +141,17 @@ class Lesson(models.Model):
     def save(self, *args, **kwargs):
         with transaction.atomic():
             lock_teacher_assignment(self.teacher_id)
+            lock_capacity_write(Room._meta.db_table, self.room_id)
             self.full_clean()
             return super().save(*args, **kwargs)
+
+
+def ordered_lessons(queryset):
+    weekdays = Lesson.Weekday.values
+    return queryset.annotate(_weekday_rank=Case(
+        *(When(weekday=day, then=Value(index)) for index, day in enumerate(weekdays)),
+        output_field=IntegerField(),
+    )).order_by('_weekday_rank', 'start_time', 'pk')
 
 
 def lock_teacher_assignment(user_id):
@@ -126,3 +161,11 @@ def lock_teacher_assignment(user_id):
         user_table = connection.ops.quote_name(get_user_model()._meta.db_table)
         with connection.cursor() as cursor:
             cursor.execute(f'UPDATE {user_table} SET last_login = last_login WHERE id = %s', [user_id])
+
+
+def lock_capacity_write(table, pk):
+    """Serialize SQLite validation with competing lesson, room and group writes."""
+    if pk is not None and connection.vendor == 'sqlite':
+        quoted_table = connection.ops.quote_name(table)
+        with connection.cursor() as cursor:
+            cursor.execute(f'UPDATE {quoted_table} SET id = id WHERE id = %s', [pk])

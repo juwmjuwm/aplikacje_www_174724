@@ -220,6 +220,13 @@ class UserViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         return [IsAuthenticated(), IsSelfOrAdmin()]
 
     @extend_schema(
+        responses={200: UserSerializer, 401: OpenApiResponse(description='Authentication required.')},
+    )
+    @action(detail=False, methods=['get'], url_path='me')
+    def me(self, request):
+        return Response(UserSerializer(request.user).data)
+
+    @extend_schema(
         request=ProfileSerializer,
         responses={
             200: UserSerializer,

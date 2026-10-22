@@ -2,7 +2,7 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 
 
 def user_roles(user):
-    memberships = set(user.groups.filter(name__in=('PLANNER', 'TEACHER')).values_list('name', flat=True))
+    memberships = {group.name for group in user.groups.all() if group.name in ('PLANNER', 'TEACHER')}
     roles = (['ADMIN'] if user.is_superuser else []) + [
         role for role in ('PLANNER', 'TEACHER') if role in memberships
     ]

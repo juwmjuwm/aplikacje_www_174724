@@ -141,12 +141,19 @@ Na przykład utwórz plan zajęć za pomocą `POST /api/timetables/` i `{"name":
 
 Zastąp przykładowe ID wartościami z własnych odpowiedzi. Dozwolone dni tygodnia to `MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT` i `SUN`. Godzina zakończenia musi być późniejsza niż godzina rozpoczęcia. Lekcje nie mogą nakładać się w tym samym dniu dla tej samej sali, tego samego nauczyciela lub tej samej grupy uczniów, nawet w różnych planach zajęć. Zaktualizuj lekcję za pomocą `PATCH /api/lessons/{id}/`, na przykład `{"room":2}`, albo usuń ją za pomocą `DELETE /api/lessons/{id}/`.
 
-### Listy, wyszukiwanie i błędy
+### Listowanie i wyszukiwanie
 
 Odpowiedzi dla wszystkich kolekcji, w tym lista użytkowników dostępna administratorowi, są dzielone na strony:
 
 ```json
-{"count":12,"next":"http://127.0.0.1:8000/api/rooms/?page=2","previous":null,"results":[{"id":1,"name":"Room 101","capacity":30}]}
+{
+  "count":12,
+  "next":"http://127.0.0.1:8000/api/rooms/?page=2",
+  "previous":null,
+  "results":[
+    { "id":1, "name":"Room 101", "capacity":30 }
+  ]
+}
 ```
 
-Odczytuj rekordy z pola `results`. Domyślnie strony zawierają 10 rekordów. Użyj `?page=2&size=5`; `size` musi być dodatnie i nie może przekraczać 100. Użyj `search` do wyszukiwania częściowych dopasowań bez rozróżniania wielkości liter: w nazwach planów zajęć, grup uczniów i sal; w nazwie lub opisie przedmiotu; oraz w imionach lub nazwiskach nauczycieli. Na przykład `GET /api/subjects/?search=biology&size=5`. Lekcje i użytkownicy nie mają filtra wyszukiwania.
+Rekordy odczytujemy z pola `results`. Domyślnie strony zawierają 10 rekordów. Użyj `?page=2&size=5`; `size` musi być dodatnie i nie może przekraczać 100. Użyj `search` do wyszukiwania częściowych dopasowań bez rozróżniania wielkości liter: w nazwach planów zajęć, grup uczniów i sal; w nazwie lub opisie przedmiotu; oraz w imionach lub nazwiskach nauczycieli. Na przykład `GET /api/subjects/?search=biology&size=5`. Lekcje i użytkownicy nie mają filtra wyszukiwania.
