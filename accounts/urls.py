@@ -1,12 +1,13 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import SimpleRouter
 
 from . import views
 
+router = SimpleRouter()
+router.register(r'users', views.UserViewSet, basename='user')
+
 urlpatterns = [
-    path('register/', views.register_api, name='register'),
-    path('users/me/password/', views.password_change_api, name='password_change'),
-    path('users/me/', views.user_me_api, name='user-me'),
-    path('users/', views.user_list_api, name='user-list'),
-    path('users/<int:pk>/', views.user_detail_api, name='user-detail'),
-    path('users/<int:pk>/role/', views.user_role_api, name='user-role'),
+    path('register/', views.RegisterAPIView.as_view(), name='register'),
+    path('users/me/password/', views.UserViewSet.as_view({'post': 'change_password'}), name='password_change'),
+    path('', include(router.urls)),
 ]

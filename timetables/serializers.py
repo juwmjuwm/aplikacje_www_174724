@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection
 from rest_framework import serializers
 
+from accounts.permissions import user_roles
 from accounts.serializers import UserSerializer
 from .models import Lesson, Room, StudentGroup, Subject, Timetable
 
@@ -215,7 +216,76 @@ class LessonReadSerializer(serializers.ModelSerializer):
         return round((obj.student_group.size / obj.room.capacity) * 100.0, 1)
 
 
+class TimetableSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Timetable
+        fields = ("id", "name")
+
+
+class StudentGroupSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudentGroup
+        fields = ("id", "name", "size")
+
+
+class SubjectSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Subject
+        fields = ("id", "name")
+
+
+class RoomSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Room
+        fields = ("id", "name", "capacity")
+
+
+class TeacherSummarySerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
+
+    class Meta:
+        model = get_user_model()
+        fields = ("id", "username", "first_name", "last_name", "roles")
+
+    def get_roles(self, obj) -> list[str]:
+        return user_roles(obj)
+
+
+class LessonListSerializer(serializers.ModelSerializer):
+    timetable = TimetableSummarySerializer(read_only=True)
+    student_group = StudentGroupSummarySerializer(read_only=True)
+    subject = SubjectSummarySerializer(read_only=True)
+    teacher = TeacherSummarySerializer(read_only=True)
+    room = RoomSummarySerializer(read_only=True)
+
+    class Meta:
+        model = Lesson
+        fields = (
+            "id", "timetable", "student_group", "subject", "teacher", "room",
+            "weekday", "start_time", "end_time",
+        )
+
+
 class TimetableLessonsSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
     lessons = LessonReadSerializer(many=True, read_only=True)
+
+
+class TimetableClearLessonsSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    deleted_lessons_count = serializers.IntegerField(read_only=True)
+
+
+class SchedulingSummarySerializer(serializers.Serializer):
+    timetables_count = serializers.IntegerField(read_only=True)
+    lessons_count = serializers.IntegerField(read_only=True)
+    student_groups_count = serializers.IntegerField(read_only=True)
+    subjects_count = serializers.IntegerField(read_only=True)
+    rooms_count = serializers.IntegerField(read_only=True)
+    teachers_count = serializers.IntegerField(read_only=True)
+    min_room_capacity = serializers.IntegerField(read_only=True)
+    max_room_capacity = serializers.IntegerField(read_only=True)
+    average_room_capacity = serializers.FloatField(read_only=True)
+

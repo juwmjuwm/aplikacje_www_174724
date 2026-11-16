@@ -1,336 +1,33 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.db.models import Avg, Count, Max, Min
 from django.db.models.deletion import ProtectedError
 from django.http import JsonResponse
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, renderer_classes
+from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
-from rest_framework.generics import get_object_or_404
-from rest_framework.renderers import JSONRenderer
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from rest_framework.views import APIView
 
 from accounts.serializers import UserSerializer
 from timetable_planner.pagination import CollectionPagination
 from .models import Lesson, Room, StudentGroup, Subject, Timetable, ordered_lessons
 from .permissions import SchedulingPermission
 from .serializers import (
-    LessonReadSerializer, LessonWriteSerializer, RoomSerializer, StudentGroupSerializer,
-    SubjectSerializer, TimetableLessonsSerializer, TimetableSerializer,
+    LessonListSerializer,
+    LessonReadSerializer,
+    LessonWriteSerializer,
+    RoomSerializer,
+    SchedulingSummarySerializer,
+    StudentGroupSerializer,
+    SubjectSerializer,
+    TimetableClearLessonsSerializer,
+    TimetableLessonsSerializer,
+    TimetableSerializer,
 )
 
-
-def _paginate_and_respond(request, queryset, serializer_class, search_fields=None):
-    if search_fields:
-        search_filter = SearchFilter()
-        class ViewWrapper:
-            pass
-        view = ViewWrapper()
-        view.search_fields = search_fields
-        queryset = search_filter.filter_queryset(request, queryset, view)
-
-    paginator = CollectionPagination()
-    page = paginator.paginate_queryset(queryset, request)
-    if page is not None:
-        serializer = serializer_class(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
-    serializer = serializer_class(queryset, many=True)
-    return Response(serializer.data)
-
-
-# ----------------------------------------------------------------------
-# Timetable Views
-# ----------------------------------------------------------------------
-
-@extend_schema(
-    request=TimetableSerializer,
-    responses={
-        200: TimetableSerializer(many=True),
-        201: TimetableSerializer,
-    }
-)
-@api_view(['GET', 'POST'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def timetable_list_create_api(request):
-    if request.method == 'GET':
-        queryset = Timetable.objects.prefetch_related('lessons')
-        return _paginate_and_respond(request, queryset, TimetableSerializer, search_fields=('name',))
-
-    serializer = TimetableSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    serializer.save()
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(
-    request=TimetableSerializer,
-    responses={
-        200: TimetableSerializer,
-        404: OpenApiResponse(description='Timetable not found.'),
-        409: OpenApiResponse(description='Related lessons prevent deletion.'),
-    }
-)
-@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def timetable_detail_api(request, pk):
-    timetable = get_object_or_404(Timetable.objects.prefetch_related('lessons'), pk=pk)
-
-    if request.method == 'GET':
-        return Response(TimetableSerializer(timetable).data)
-
-    if request.method in ('PUT', 'PATCH'):
-        partial = request.method == 'PATCH'
-        serializer = TimetableSerializer(timetable, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
-
-    try:
-        timetable.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except ProtectedError:
-        return Response(
-            {"detail": "Related lessons prevent deletion of this resource."},
-            status=status.HTTP_409_CONFLICT,
-        )
-
-
-@extend_schema(
-    responses={
-        200: TimetableLessonsSerializer,
-        401: OpenApiResponse(description='Authentication required.'),
-        404: OpenApiResponse(description='Timetable not found.'),
-    }
-)
-@api_view(['GET'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def timetable_lessons_api(request, pk):
-    timetable = get_object_or_404(Timetable, pk=pk)
-    lessons = ordered_lessons(
-        Lesson.objects.filter(timetable=timetable)
-        .select_related('timetable', 'student_group', 'subject', 'teacher', 'room')
-        .prefetch_related('teacher__groups')
-    )
-    return Response({
-        'id': timetable.pk,
-        'name': timetable.name,
-        'lessons': LessonReadSerializer(lessons, many=True).data,
-    })
-
-
-# ----------------------------------------------------------------------
-# StudentGroup Views
-# ----------------------------------------------------------------------
-
-@extend_schema(
-    request=StudentGroupSerializer,
-    responses={
-        200: StudentGroupSerializer(many=True),
-        201: StudentGroupSerializer,
-    }
-)
-@api_view(['GET', 'POST'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def student_group_list_create_api(request):
-    if request.method == 'GET':
-        queryset = StudentGroup.objects.all()
-        return _paginate_and_respond(request, queryset, StudentGroupSerializer, search_fields=('name',))
-
-    serializer = StudentGroupSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    serializer.save()
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(
-    request=StudentGroupSerializer,
-    responses={
-        200: StudentGroupSerializer,
-        404: OpenApiResponse(description='Student group not found.'),
-        409: OpenApiResponse(description='Related lessons prevent deletion.'),
-    }
-)
-@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def student_group_detail_api(request, pk):
-    group = get_object_or_404(StudentGroup, pk=pk)
-
-    if request.method == 'GET':
-        return Response(StudentGroupSerializer(group).data)
-
-    if request.method in ('PUT', 'PATCH'):
-        partial = request.method == 'PATCH'
-        serializer = StudentGroupSerializer(group, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
-
-    try:
-        group.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except ProtectedError:
-        return Response(
-            {"detail": "Related lessons prevent deletion of this resource."},
-            status=status.HTTP_409_CONFLICT,
-        )
-
-
-# ----------------------------------------------------------------------
-# Subject Views
-# ----------------------------------------------------------------------
-
-@extend_schema(
-    request=SubjectSerializer,
-    responses={
-        200: SubjectSerializer(many=True),
-        201: SubjectSerializer,
-    }
-)
-@api_view(['GET', 'POST'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def subject_list_create_api(request):
-    if request.method == 'GET':
-        queryset = Subject.objects.all()
-        return _paginate_and_respond(request, queryset, SubjectSerializer, search_fields=('name', 'description'))
-
-    serializer = SubjectSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    serializer.save()
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(
-    request=SubjectSerializer,
-    responses={
-        200: SubjectSerializer,
-        404: OpenApiResponse(description='Subject not found.'),
-        409: OpenApiResponse(description='Related lessons prevent deletion.'),
-    }
-)
-@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def subject_detail_api(request, pk):
-    subject = get_object_or_404(Subject, pk=pk)
-
-    if request.method == 'GET':
-        return Response(SubjectSerializer(subject).data)
-
-    if request.method in ('PUT', 'PATCH'):
-        partial = request.method == 'PATCH'
-        serializer = SubjectSerializer(subject, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
-
-    try:
-        subject.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except ProtectedError:
-        return Response(
-            {"detail": "Related lessons prevent deletion of this resource."},
-            status=status.HTTP_409_CONFLICT,
-        )
-
-
-# ----------------------------------------------------------------------
-# Room Views
-# ----------------------------------------------------------------------
-
-@extend_schema(
-    request=RoomSerializer,
-    responses={
-        200: RoomSerializer(many=True),
-        201: RoomSerializer,
-    }
-)
-@api_view(['GET', 'POST'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def room_list_create_api(request):
-    if request.method == 'GET':
-        queryset = Room.objects.all()
-        return _paginate_and_respond(request, queryset, RoomSerializer, search_fields=('name',))
-
-    serializer = RoomSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    serializer.save()
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(
-    request=RoomSerializer,
-    responses={
-        200: RoomSerializer,
-        404: OpenApiResponse(description='Room not found.'),
-        409: OpenApiResponse(description='Related lessons prevent deletion.'),
-    }
-)
-@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def room_detail_api(request, pk):
-    room = get_object_or_404(Room, pk=pk)
-
-    if request.method == 'GET':
-        return Response(RoomSerializer(room).data)
-
-    if request.method in ('PUT', 'PATCH'):
-        partial = request.method == 'PATCH'
-        serializer = RoomSerializer(room, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
-
-    try:
-        room.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except ProtectedError:
-        return Response(
-            {"detail": "Related lessons prevent deletion of this resource."},
-            status=status.HTTP_409_CONFLICT,
-        )
-
-
-# ----------------------------------------------------------------------
-# Teacher Views (Read-Only)
-# ----------------------------------------------------------------------
-
-@extend_schema(
-    responses={
-        200: UserSerializer(many=True),
-    }
-)
-@api_view(['GET'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def teacher_list_api(request):
-    queryset = get_user_model().objects.filter(groups__name='TEACHER').distinct().order_by('pk')
-    return _paginate_and_respond(request, queryset, UserSerializer, search_fields=('first_name', 'last_name'))
-
-
-@extend_schema(
-    responses={
-        200: UserSerializer,
-        404: OpenApiResponse(description='Teacher not found.'),
-    }
-)
-@api_view(['GET'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def teacher_detail_api(request, pk):
-    teacher = get_object_or_404(get_user_model().objects.filter(groups__name='TEACHER').distinct(), pk=pk)
-    return Response(UserSerializer(teacher).data)
-
-
-# ----------------------------------------------------------------------
-# Lesson Views
-# ----------------------------------------------------------------------
 
 def get_optimized_lesson_queryset():
     return Lesson.objects.select_related(
@@ -338,62 +35,182 @@ def get_optimized_lesson_queryset():
     ).prefetch_related('teacher__groups')
 
 
-@extend_schema(
-    responses={
-        200: LessonReadSerializer(many=True),
-        201: LessonReadSerializer,
-    },
-    request=LessonWriteSerializer,
+class ProtectedDeleteMixin:
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"detail": "Related lessons prevent deletion of this resource."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+
+class TimetableViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
+    queryset = Timetable.objects.prefetch_related('lessons')
+    serializer_class = TimetableSerializer
+    permission_classes = [SchedulingPermission]
+    pagination_class = CollectionPagination
+    filter_backends = [SearchFilter]
+    search_fields = ('name',)
+
+    @extend_schema(
+        responses={
+            200: TimetableLessonsSerializer,
+            401: OpenApiResponse(description='Authentication required.'),
+            404: OpenApiResponse(description='Timetable not found.'),
+        }
+    )
+    @action(detail=True, methods=['get'])
+    def lessons(self, request, pk=None):
+        timetable = self.get_object()
+        lessons = ordered_lessons(
+            get_optimized_lesson_queryset().filter(timetable=timetable)
+        )
+        return Response({
+            'id': timetable.pk,
+            'name': timetable.name,
+            'lessons': LessonReadSerializer(lessons, many=True).data,
+        })
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: TimetableClearLessonsSerializer,
+            401: OpenApiResponse(description='Authentication required.'),
+            403: OpenApiResponse(description='PLANNER or ADMIN role required.'),
+            404: OpenApiResponse(description='Timetable not found.'),
+        }
+    )
+    @action(detail=True, methods=['post'], url_path='clear-lessons')
+    def clear_lessons(self, request, pk=None):
+        timetable = self.get_object()
+        with transaction.atomic():
+            deleted_count, _ = timetable.lessons.all().delete()
+        return Response({
+            'id': timetable.pk,
+            'name': timetable.name,
+            'deleted_lessons_count': deleted_count,
+        })
+
+
+class StudentGroupViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
+    queryset = StudentGroup.objects.all()
+    serializer_class = StudentGroupSerializer
+    permission_classes = [SchedulingPermission]
+    pagination_class = CollectionPagination
+    filter_backends = [SearchFilter]
+    search_fields = ('name',)
+
+
+class SubjectViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
+    queryset = Subject.objects.all()
+    serializer_class = SubjectSerializer
+    permission_classes = [SchedulingPermission]
+    pagination_class = CollectionPagination
+    filter_backends = [SearchFilter]
+    search_fields = ('name', 'description')
+
+
+class RoomViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
+    queryset = Room.objects.all()
+    serializer_class = RoomSerializer
+    permission_classes = [SchedulingPermission]
+    pagination_class = CollectionPagination
+    filter_backends = [SearchFilter]
+    search_fields = ('name',)
+
+
+class TeacherViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = (
+        get_user_model()
+        .objects.filter(groups__name='TEACHER')
+        .prefetch_related('groups')
+        .distinct()
+        .order_by('pk')
+    )
+    serializer_class = UserSerializer
+    permission_classes = [SchedulingPermission]
+    pagination_class = CollectionPagination
+    filter_backends = [SearchFilter]
+    search_fields = ('first_name', 'last_name')
+
+
+@extend_schema_view(
+    create=extend_schema(
+        request=LessonWriteSerializer,
+        responses={201: LessonReadSerializer},
+    ),
+    update=extend_schema(
+        request=LessonWriteSerializer,
+        responses={200: LessonReadSerializer},
+    ),
+    partial_update=extend_schema(
+        request=LessonWriteSerializer,
+        responses={200: LessonReadSerializer},
+    ),
 )
-@api_view(['GET', 'POST'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def lesson_list_create_api(request):
-    if request.method == 'GET':
-        queryset = ordered_lessons(get_optimized_lesson_queryset())
-        return _paginate_and_respond(request, queryset, LessonReadSerializer)
+class LessonViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
+    permission_classes = [SchedulingPermission]
+    pagination_class = CollectionPagination
 
-    serializer = LessonWriteSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    lesson = serializer.save()
-    refetched = get_optimized_lesson_queryset().get(pk=lesson.pk)
-    return Response(LessonReadSerializer(refetched).data, status=status.HTTP_201_CREATED)
+    def get_queryset(self):
+        return ordered_lessons(get_optimized_lesson_queryset())
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return LessonListSerializer
+        if self.action == 'retrieve':
+            return LessonReadSerializer
+        return LessonWriteSerializer
 
-@extend_schema(
-    responses={
-        200: LessonReadSerializer,
-        404: OpenApiResponse(description='Lesson not found.'),
-        409: OpenApiResponse(description='Related records prevent deletion.'),
-    },
-    request=LessonWriteSerializer,
-)
-@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([SchedulingPermission])
-@renderer_classes([JSONRenderer])
-def lesson_detail_api(request, pk):
-    base_qs = get_optimized_lesson_queryset()
-    lesson = get_object_or_404(base_qs, pk=pk)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lesson = serializer.save()
+        refetched = get_optimized_lesson_queryset().get(pk=lesson.pk)
+        return Response(LessonReadSerializer(refetched).data, status=status.HTTP_201_CREATED)
 
-    if request.method == 'GET':
-        return Response(LessonReadSerializer(lesson).data)
-
-    if request.method in ('PUT', 'PATCH'):
-        partial = request.method == 'PATCH'
-        serializer = LessonWriteSerializer(lesson, data=request.data, partial=partial)
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
-        refetched = base_qs.get(pk=updated.pk)
+        refetched = get_optimized_lesson_queryset().get(pk=updated.pk)
         return Response(LessonReadSerializer(refetched).data)
 
-    try:
-        lesson.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except ProtectedError:
-        return Response(
-            {"detail": "Related lessons prevent deletion of this resource."},
-            status=status.HTTP_409_CONFLICT,
+
+class SchedulingSummaryAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={
+            200: SchedulingSummarySerializer,
+            401: OpenApiResponse(description='Authentication required.'),
+        }
+    )
+    def get(self, request):
+        room_stats = Room.objects.aggregate(
+            rooms_count=Count('id'),
+            min_room_capacity=Min('capacity'),
+            max_room_capacity=Max('capacity'),
+            average_room_capacity=Avg('capacity'),
         )
+        avg_capacity = room_stats['average_room_capacity']
+        return Response({
+            'timetables_count': Timetable.objects.aggregate(count=Count('id'))['count'],
+            'lessons_count': Lesson.objects.aggregate(count=Count('id'))['count'],
+            'student_groups_count': StudentGroup.objects.aggregate(count=Count('id'))['count'],
+            'subjects_count': Subject.objects.aggregate(count=Count('id'))['count'],
+            'rooms_count': room_stats['rooms_count'],
+            'teachers_count': get_user_model().objects.filter(groups__name='TEACHER').aggregate(
+                count=Count('id', distinct=True)
+            )['count'],
+            'min_room_capacity': room_stats['min_room_capacity'] or 0,
+            'max_room_capacity': room_stats['max_room_capacity'] or 0,
+            'average_room_capacity': round(avg_capacity, 2) if avg_capacity is not None else 0.0,
+        })
 
 
 def unknown_api_route(request, path=""):
