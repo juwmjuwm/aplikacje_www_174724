@@ -1,6 +1,6 @@
-from django.contrib.auth import password_validation
+from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.models import AbstractUser, BaseUserManager, Group, Permission
-from django.db import models
+from django.db import connection, models
 
 from .usernames import validate_username
 from .names import normalize_name
@@ -31,7 +31,9 @@ class User(AbstractUser):
     id = models.AutoField(primary_key=True)
     email = None
     username = models.CharField(
-        max_length=150, unique=True, validators=[validate_username],
+        max_length=150,
+        unique=True,
+        validators=[validate_username],
         help_text='Required. 150 characters or fewer. Letters, decimal digits, and underscores only.',
         error_messages={'unique': 'A user with that username already exists.'},
         verbose_name='username',
@@ -57,3 +59,11 @@ class User(AbstractUser):
 
     class Meta:
         db_table = 'auth_user'
+
+
+def lock_teacher_assignment(user_id):
+    """Acquire SQLite's writer lock before checking role or lesson assignment."""
+    if user_id is not None and connection.vendor == 'sqlite':
+        user_table = connection.ops.quote_name(get_user_model()._meta.db_table)
+        with connection.cursor() as cursor:
+            cursor.execute(f'UPDATE {user_table} SET last_login = last_login WHERE id = %s', [user_id])

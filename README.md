@@ -4,21 +4,10 @@ API JSON do tygodniowych planów zajęć, lekcji, sal, przedmiotów, grup uczni�
 
 ## Uruchomienie lokalnego serwera
 
-### Wymagania wstępne
-
 - Python **3.12 lub nowszy** oraz pip. Sprawdź wersję poleceniem `python --version`.
 - Nie jest potrzebna zewnętrzna bazy danych: Django tworzy lokalną bazę SQLite podczas migracji.
 
-Aby utworzyć nową bazę danych, uruchom te polecenia w PowerShellu w systemie Windows:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-```
-
-W systemie macOS lub Linux:
+Aby utworzyć nową bazę danych, uruchom te polecenia:
 
 ```sh
 python3 -m venv .venv
@@ -49,13 +38,16 @@ python manage.py runserver
 
 Polecenie `bootstrap_accounts` tworzy grupy (role) `PLANNER` i `TEACHER` oraz tworzy administratora tylko wtedy, gdy jeszcze żaden nie istnieje; ponowne uruchomienie nie resetuje hasła istniejącego administratora.
 
-Serwer został uruchomiony. Otwórz:
+## Dokumentacja
+
 - `http://127.0.0.1:8000/api/docs/` - aby skorzystać z interaktywnego API Swagger UI
 - `http://127.0.0.1:8000/api/schema/` - aby zobaczyć schemat OpenAPI
 - `http://127.0.0.1:8000/admin/` - aby skorzystać z panelu administracyjnego Django.
 
 
-## Rejestracja i pobranie tokenów dostępu
+## Instrukcja obsługi
+
+### Rejestracja i pobranie tokenów dostępu
 
 W interfejsie Swagger UI (`/api/docs/`):
 
@@ -84,7 +76,7 @@ Host: 127.0.0.1:8000
 Authorization: Bearer <access token>
 ```
 
-## Konta i uprawnienia
+### Konta i uprawnienia
 
 | Rola lub przynależność do grupy | Dostępne działania |
 | --- | --- |
@@ -111,7 +103,7 @@ Konto może jednocześnie należeć do grup `PLANNER` i `TEACHER`. Administrator
 
 Nazwy użytkowników zawierają tylko litery, cyfry dziesiętne i znaki podkreślenia (maksymalnie 150 znaków). Są normalizowane i porównywane bez rozróżniania wielkości liter, więc `Alice` i `alice` odnoszą się do tego samego konta. Imię i nazwisko są wymagane przy rejestracji, zawierają wyłącznie litery i są zapisywane z wielką pierwszą literą. Nowe hasła muszą spełniać wymagania z sekcji dotyczącej konfiguracji. Żądania dotyczące kont nie przyjmują adresu e-mail; odpowiedzi nie zawierają adresu e-mail ani haseł. Edycja profilu nie pozwala zmieniać haseł ani ról.
 
-## API planowania zajęć
+### API planowania zajęć
 
 Uwierzytelnieni użytkownicy mogą odczytywać wszystkie kolekcje i poszczególne rekordy. Użytkownicy `PLANNER` i `ADMIN` mogą tworzyć rekordy, całkowicie je zastępować (`PUT`), częściowo aktualizować (`PATCH`) i usuwać, z wyjątkiem nauczycieli. Lista nauczycieli służy wyłącznie do odczytu; przypisz rolę `TEACHER` przez opisany wyżej punkt końcowy ról. Ścieżka kolekcji kończy się znakiem `/`; aby wskazać jeden element, dodaj jego ID, na przykład `GET /api/rooms/1/`. ID w odpowiedziach są tylko do odczytu.
 

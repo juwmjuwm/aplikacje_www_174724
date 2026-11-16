@@ -4,6 +4,9 @@ from django.core.validators import MinValueValidator
 from django.db import connection, models, transaction
 from django.db.models import Case, IntegerField, Value, When
 
+from accounts.models import lock_teacher_assignment
+from accounts.permissions import user_roles
+
 
 class Timetable(models.Model):
     name = models.CharField(max_length=50)
@@ -113,7 +116,6 @@ class Lesson(models.Model):
             if self.student_group.size > self.room.capacity:
                 errors["room"] = "Room capacity is smaller than the student group size."
         if self.teacher_id is not None:
-            from .permissions import user_roles
             if 'TEACHER' not in user_roles(self.teacher):
                 errors['teacher'] = 'Teacher must have the TEACHER role.'
         if self.start_time is not None and self.end_time is not None:
@@ -152,15 +154,6 @@ def ordered_lessons(queryset):
         *(When(weekday=day, then=Value(index)) for index, day in enumerate(weekdays)),
         output_field=IntegerField(),
     )).order_by('_weekday_rank', 'start_time', 'pk')
-
-
-def lock_teacher_assignment(user_id):
-    """Acquire SQLite's writer lock before checking role or lesson assignment."""
-    if user_id is not None and connection.vendor == 'sqlite':
-        from django.contrib.auth import get_user_model
-        user_table = connection.ops.quote_name(get_user_model()._meta.db_table)
-        with connection.cursor() as cursor:
-            cursor.execute(f'UPDATE {user_table} SET last_login = last_login WHERE id = %s', [user_id])
 
 
 def lock_capacity_write(table, pk):
